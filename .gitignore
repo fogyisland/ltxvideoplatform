@@ -11,3 +11,19 @@ venv/
 *.egg-info/
 dist/
 build/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
+
+# IDE / OS
+.DS_Store
+.vscode/
+.idea/

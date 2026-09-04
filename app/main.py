@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 import uvicorn
@@ -10,9 +11,18 @@ from fastapi import FastAPI
 
 
 def build_app() -> FastAPI:
+    from fastapi.middleware.cors import CORSMiddleware
     from app.api import auth, models, uploads, generation, jobs, history, files as files_api, admin as admin_api
 
     app = FastAPI(title="LTX-Video Web Platform", version="0.1.0")
+    # CORS for browser clients (Next.js frontend on a different port)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # MVP: trust the local frontend
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(auth.router)
     app.include_router(models.router)
     app.include_router(uploads.router)
@@ -66,9 +76,12 @@ def _bootstrap() -> None:
     s.outputs_dir.mkdir(parents=True, exist_ok=True)
     s.previews_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2. CUDA check
+    # 2. CUDA check (skip if LTX_ALLOW_NO_CUDA=1, for UI-only demo on non-GPU hosts)
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA not available; this app requires a GPU.")
+        if os.environ.get("LTX_ALLOW_NO_CUDA") == "1":
+            print("[bootstrap] WARNING: CUDA not available — running in UI-only demo mode (LTX_ALLOW_NO_CUDA=1)")
+        else:
+            raise RuntimeError("CUDA not available; this app requires a GPU. Set LTX_ALLOW_NO_CUDA=1 to bypass for UI demos.")
 
     # 3. schema
     Base.metadata.create_all(get_engine())

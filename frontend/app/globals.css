@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+/* ============================================================ Design tokens
+   Warm "creative studio" palette — distinctive, not the cream+terracotta default.
+   ============================================================ */
+:root {
+  --bg-0: #F8F5F0;
+  --bg-1: #FFFFFF;
+  --bg-2: #F2EEE7;
+  --bg-3: #ECE7DE;
+  --ink-0: #2B2926;
+  --ink-1: #6B6660;
+  --ink-2: #A8A39C;
+  --accent: #4A6B7C;
+  --accent-soft: #E8EEF1;
+  --warm: #C9A86A;
+  --good: #7A9F6E;
+  --line: #E0DAD1;
+  --shadow-sm: 0 1px 0 rgba(43, 41, 38, 0.04);
+  --shadow-md: 0 1px 0 rgba(43, 41, 38, 0.04), 0 8px 24px rgba(43, 41, 38, 0.04);
+}
+
+@theme inline {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-ink-0: var(--ink-0);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-warm: var(--warm);
+  --color-good: var(--good);
+  --color-line: var(--line);
+  --font-sans: var(--font-inter), "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: var(--font-serif-display), "Songti SC", "Noto Serif CJK SC", serif;
+  --font-mono: var(--font-mono-display), "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+html, body {
+  background: var(--bg-0);
+  color: var(--ink-0);
+  font-family: var(--font-sans);
+}
+
+/* ============================================================ Component primitives
+   ============================================================ */
+.ltx-mark {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--warm);
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  position: relative;
+  top: -2px;
+}
+
+.ltx-hero-title {
+  font-family: var(--font-serif);
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin: 0 0 8px 0;
+}
+
+.ltx-hero-subtitle {
+  font-size: 16px;
+  color: var(--ink-1);
+  font-weight: 400;
+  margin: 0;
+}
+
+.ltx-section-title {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  margin: 32px 0 16px 0;
+}
+
+.ltx-section-subtitle {
+  font-size: 13px;
+  color: var(--ink-1);
+  margin: 0 0 16px 0;
+}
+
+.ltx-card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--shadow-md);
+}
+
+/* Language switcher */
+.ltx-lang-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.ltx-lang-btn[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The one memorable element */
+.ltx-primary {
+  background: var(--ink-0) !important;
+  color: var(--bg-0) !important;
+  border: none;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 14px 28px;
+  letter-spacing: 0.01em;
+  box-shadow: var(--shadow-md);
+}
+.ltx-primary:hover { background: var(--ink-1) !important; }
+
+.ltx-secondary {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-0);
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 999px;
+}
+
+/* Big prompt input */
+.ltx-input {
+  font-size: 17px;
+  line-height: 1.5;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-1);
+  color: var(--ink-0);
+  font-family: var(--font-sans);
+  width: 100%;
+  outline: none;
+  min-height: 88px;
+  resize: vertical;
+}
+.ltx-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Style preset chips */
+.ltx-chip {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  color: var(--ink-0);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ltx-chip:hover { border-color: var(--ink-2); }
+.ltx-chip[data-active="true"] {
+  background: var(--ink-0);
+  color: var(--bg-0);
+  border-color: var(--ink-0);
+}
+
+/* Example prompt cards */
+.ltx-example {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font-family: inherit;
+  color: var(--ink-0);
+}
+.ltx-example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Status pill */
+.ltx-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-1);
+  background: var(--bg-2);
+}
+.ltx-pill[data-status="succeeded"] { color: var(--good); border-color: var(--good); }
+.ltx-pill[data-status="running"] { color: var(--accent); border-color: var(--accent); }
+.ltx-pill[data-status="failed"] { color: #c66; border-color: #c66; }
+
+/* Nav tabs (App Router-style links) */
+.ltx-nav-link {
+  padding: 10px 16px;
+  color: var(--ink-1);
+  font-weight: 500;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.ltx-nav-link[data-active="true"] {
+  color: var(--ink-0);
+  border-bottom-color: var(--ink-0);
+}
+
+/* Tables */
+.ltx-table {
+  width: 100%;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-collapse: collapse;
+}
+.ltx-table th { text-align: left; padding: 10px 12px; color: var(--ink-1); border-bottom: 1px solid var(--line); font-weight: 500; }
+.ltx-table td { padding: 10px 12px; border-top: 1px solid var(--line); }
+.ltx-table tr:first-child td { border-top: 0; }
+
+/* Form labels */
+.ltx-label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: var(--ink-0); }
+.ltx-field { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-1); color: var(--ink-0); font-size: 14px; outline: none; }
+.ltx-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.ltx-progress {
+  height: 4px;
+  background: var(--bg-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ltx-progress > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
