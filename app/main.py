@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 
 def build_app() -> FastAPI:
-    from app.api import auth, models, uploads, generation, jobs, history, files as files_api
+    from app.api import auth, models, uploads, generation, jobs, history, files as files_api, admin as admin_api
 
     app = FastAPI(title="LTX-Video Web Platform", version="0.1.0")
     app.include_router(auth.router)
@@ -20,6 +20,7 @@ def build_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(history.router)
     app.include_router(files_api.router)
+    app.include_router(admin_api.router)
     return app
 
 

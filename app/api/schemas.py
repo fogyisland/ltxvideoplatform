@@ -17,6 +17,7 @@ class TokenOut(BaseModel):
 class UserOut(BaseModel):
     id: int
     username: str
+    email: str | None = None
     role: str
 
 

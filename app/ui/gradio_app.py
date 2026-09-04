@@ -47,6 +47,7 @@ I18N = {
         "library_subtitle": "Videos you've made before",
         "tab_create": "Create",
         "tab_library": "Library",
+        "tab_admin": "Admin",
         "signin": "Sign in",
         "signin_title": "Welcome back",
         "signin_subtitle": "Sign in to save your creations",
@@ -68,6 +69,37 @@ I18N = {
         "err_failed": "Something went wrong. Try again.",
         "queue_position": "In the queue · position {n}",
         "style_appended": "Style: {style}",
+        "admin_users": "Users",
+        "admin_models": "Models",
+        "admin_stats": "System",
+        "admin_users_subtitle": "Create accounts, reset passwords, enable or disable users",
+        "admin_models_subtitle": "Download and enable model variants",
+        "admin_stats_subtitle": "GPU, disk, queue and recent jobs",
+        "admin_username": "username",
+        "admin_email": "email (optional)",
+        "admin_password": "password",
+        "admin_role": "role",
+        "admin_add_user": "Add user",
+        "admin_user_id": "user id",
+        "admin_new_password": "new password",
+        "admin_reset_pw": "Reset password",
+        "admin_toggle_active": "Toggle active",
+        "admin_delete": "Disable",
+        "admin_download": "Download",
+        "admin_refresh": "Refresh",
+        "admin_user_table": "id | username | email | role | active | last login",
+        "admin_model_table": "id | name | downloaded | size | enabled | status",
+        "admin_signup_title": "Create your account",
+        "admin_signup_subtitle": "Sign up to start creating",
+        "admin_signup_email": "email",
+        "admin_signup_password": "password (8+ chars)",
+        "admin_signup_btn": "Sign up",
+        "admin_have_account": "Already have an account? Sign in",
+        "admin_no_account": "New here? Create an account",
+        "admin_landing_title": "LTX Studio",
+        "admin_landing_subtitle": "Generate short videos from text prompts — running on your own GPU.",
+        "admin_landing_cta_signin": "Sign in",
+        "admin_landing_cta_signup": "Create account",
     },
     "zh": {
         "app_name": "LTX 工作室",
@@ -101,6 +133,7 @@ I18N = {
         "library_subtitle": "你之前做过的视频",
         "tab_create": "创作",
         "tab_library": "作品库",
+        "tab_admin": "管理",
         "signin": "登录",
         "signin_title": "欢迎回来",
         "signin_subtitle": "登录后可以保存你的创作",
@@ -122,6 +155,37 @@ I18N = {
         "err_failed": "出错了，重试一下。",
         "queue_position": "排队中 · 第 {n} 位",
         "style_appended": "风格：{style}",
+        "admin_users": "用户",
+        "admin_models": "模型",
+        "admin_stats": "系统",
+        "admin_users_subtitle": "创建账号、重置密码、启用或禁用用户",
+        "admin_models_subtitle": "下载和启用模型变体",
+        "admin_stats_subtitle": "GPU、磁盘、队列和最近任务",
+        "admin_username": "用户名",
+        "admin_email": "邮箱（可选）",
+        "admin_password": "密码",
+        "admin_role": "角色",
+        "admin_add_user": "添加用户",
+        "admin_user_id": "用户 ID",
+        "admin_new_password": "新密码",
+        "admin_reset_pw": "重置密码",
+        "admin_toggle_active": "切换启用",
+        "admin_delete": "禁用",
+        "admin_download": "下载",
+        "admin_refresh": "刷新",
+        "admin_user_table": "ID | 用户名 | 邮箱 | 角色 | 启用 | 最近登录",
+        "admin_model_table": "ID | 名称 | 已下载 | 大小 | 启用 | 状态",
+        "admin_signup_title": "创建账号",
+        "admin_signup_subtitle": "注册后即可开始创作",
+        "admin_signup_email": "邮箱",
+        "admin_signup_password": "密码（至少 8 位）",
+        "admin_signup_btn": "注册",
+        "admin_have_account": "已有账号？登录",
+        "admin_no_account": "新用户？创建账号",
+        "admin_landing_title": "LTX 工作室",
+        "admin_landing_subtitle": "用文字描述生成短视频 — 跑在你自己的 GPU 上。",
+        "admin_landing_cta_signin": "登录",
+        "admin_landing_cta_signup": "注册账号",
     },
 }
 
@@ -489,7 +553,12 @@ def build_gradio_app(launch: bool = True):
             state["me"] = c.me()
         except Exception:
             state["me"] = None
-        return state, gr.update(visible=False), gr.update(value=t("signed_in_as", state["lang"], name=(state["me"] or {}).get("username", "user")))
+        me = state.get("me") or {}
+        is_admin = me.get("role") == "admin"
+        return (state,
+                gr.update(visible=False),
+                gr.update(value=t("signed_in_as", state["lang"], name=me.get("username", "user"))),
+                gr.update(visible=is_admin))
 
     def signout(state):
         state["token"] = None
@@ -639,6 +708,112 @@ def build_gradio_app(launch: bool = True):
         except Exception as e:
             raise gr.Error(str(e) or t("err_failed", lang))
 
+    # ----- admin handlers --------------------------------------------------
+
+    def refresh_admin_users(state):
+        c = _client(state)
+        try:
+            users = c.admin_list_users()
+            return [[u["id"], u["username"], u.get("email") or "",
+                     u["role"], u["is_active"], u.get("last_login_at") or ""]
+                    for u in users]
+        except Exception as e:
+            return [[f"error: {e}", "", "", "", "", ""]]
+
+    def admin_add_user(username, email, password, role, state):
+        lang = state["lang"]
+        c = _client(state)
+        try:
+            u = c.admin_create_user(username, email or None, password, role)
+            return (gr.update(value=f"✓ {u['username']} ({u['role']})"), refresh_admin_users(state))
+        except Exception as e:
+            return (gr.update(value=f"✗ {e}"), gr.update())
+
+    def admin_reset_password(user_id, new_pw, state):
+        lang = state["lang"]
+        c = _client(state)
+        try:
+            c.admin_reset_password(int(user_id), new_pw)
+            return gr.update(value="✓ password reset")
+        except Exception as e:
+            return gr.update(value=f"✗ {e}")
+
+    def refresh_admin_models(state):
+        c = _client(state)
+        try:
+            rows = c.admin_list_models()
+            return [[m["id"], m["display_name"],
+                     "✓" if m["downloaded"] else "—",
+                     f"{m['size_gb']} GB" if m["downloaded"] else "—",
+                     m["enabled"],
+                     m["download_status"]["status"] if m.get("download_status") else ""]
+                    for m in rows]
+        except Exception as e:
+            return [[f"error: {e}", "", "", "", "", ""]]
+
+    def admin_download_model(model_id, state):
+        c = _client(state)
+        try:
+            r = c.admin_download_model(model_id)
+            return gr.update(value=f"started: {r.get('status')}")
+        except Exception as e:
+            return gr.update(value=f"✗ {e}")
+
+    def refresh_admin_stats(state):
+        c = _client(state)
+        try:
+            s = c.admin_stats()
+            gpu = s["gpu"]
+            d = s["disk"]
+            users = s["users"]
+            jobs = s["jobs"]
+            pipe = s["pipeline"]
+            recent = s["recent_jobs"]
+            recent_md = "\n".join(
+                f"- `{r['id']}` · {r['username']} · {r['kind']} · {r['status']} · {r['created_at'][:19] if r.get('created_at') else ''}"
+                for r in recent
+            ) or "(no jobs yet)"
+            gpu_md = (f"**{gpu['name']}** · {gpu['vram_used_gb']} / {gpu['vram_total_gb']} GB"
+                      if gpu["available"] else "CUDA not available")
+            md = f"""### System
+
+- **GPU:** {gpu_md}
+- **Pipeline:** `{pipe['current_id']}`
+- **Disk (data):** {d['data_free_gb']} / {d['data_total_gb']} GB free
+- **Disk (models):** {d['model_free_gb']} / {d['model_total_gb']} GB free
+- **Users:** {users['active']} active / {users['total']} total
+
+### Jobs
+- queued: **{jobs['queued']}**
+- running: **{jobs['running']}**
+- succeeded: **{jobs['succeeded']}**
+- failed: **{jobs['failed']}**
+
+### Recent activity (latest 20)
+
+{recent_md}
+"""
+            return gr.update(value=md)
+        except Exception as e:
+            return gr.update(value=f"error: {e}")
+
+    def signup_handler(username, email, password, state):
+        lang = state["lang"]
+        c = _client(state)
+        try:
+            c.signup(username, email, password)
+            state["token"] = c.token
+            state["me"] = c.me()
+            return (state,
+                    gr.update(visible=False),
+                    gr.update(value=t("signed_in_as", lang, name=state["me"]["username"])),
+                    gr.update(visible=state["me"]["role"] == "admin"))
+        except Exception as e:
+            return (state,
+                    gr.update(),
+                    gr.update(value=f"✗ {e}"),
+                    gr.update())
+
     # ----- build blocks ----------------------------------------------------
 
     with gr.Blocks(title="LTX Studio", css=CSS, theme=gr.themes.Base()) as blocks:
@@ -653,15 +828,28 @@ def build_gradio_app(launch: bool = True):
                     en_btn = gr.Button("English", elem_classes="lang-btn" + (" lang-active" if L == "en" else ""), scale=1)
                     zh_btn = gr.Button("中文", elem_classes="lang-btn" + (" lang-active" if L == "zh" else ""), scale=1)
 
-        # Sign-in panel (initially hidden if logged in)
+        # Sign-in / sign-up panel (visible only when anonymous)
         with gr.Column(visible=True, elem_classes="signin-panel") as signin_panel:
-            gr.Markdown(f'<div class="signin-title">{t("signin_title", L)}</div>')
-            gr.Markdown(f'<div class="signin-subtitle">{t("signin_subtitle", L)}</div>')
-            with gr.Row(elem_classes="signin-row"):
-                u = gr.Textbox(label=t("username", L), placeholder="admin", scale=2)
-                p = gr.Textbox(label=t("password", L), type="password", scale=2)
-                btn = gr.Button(t("signin_btn", L), variant="primary", scale=1)
-            signin_status = gr.Markdown("")
+            with gr.Tabs():
+                with gr.Tab(t("signin_btn", L)):
+                    gr.Markdown(f'<div class="signin-title">{t("signin_title", L)}</div>')
+                    gr.Markdown(f'<div class="signin-subtitle">{t("signin_subtitle", L)}</div>')
+                    with gr.Row(elem_classes="signin-row"):
+                        u = gr.Textbox(label=t("username", L), placeholder="admin", scale=2)
+                        p = gr.Textbox(label=t("password", L), type="password", scale=2)
+                        btn = gr.Button(t("signin_btn", L), variant="primary", scale=1)
+                    signin_status = gr.Markdown("")
+
+                with gr.Tab(t("admin_signup_btn", L)):
+                    gr.Markdown(f'<div class="signin-title">{t("admin_signup_title", L)}</div>')
+                    gr.Markdown(f'<div class="signin-subtitle">{t("admin_signup_subtitle", L)}</div>')
+                    with gr.Row(elem_classes="signin-row"):
+                        su_username = gr.Textbox(label=t("username", L), scale=2)
+                        su_email = gr.Textbox(label=t("admin_signup_email", L), scale=3)
+                    with gr.Row(elem_classes="signin-row"):
+                        su_password = gr.Textbox(label=t("admin_signup_password", L), type="password", scale=4)
+                        signup_btn = gr.Button(t("admin_signup_btn", L), variant="primary", scale=1)
+                    signup_status = gr.Markdown("")
 
         # Sign-in status banner (above tabs once logged in)
         signin_banner = gr.Markdown("", visible=False)
@@ -756,9 +944,54 @@ def build_gradio_app(launch: bool = True):
                     interactive=False,
                 )
 
+                # ----- Admin tab (visible only for role=admin) -----
+                with gr.Tab(t("tab_admin", L), visible=False) as tab_admin:
+                    with gr.Tabs():
+                        with gr.Tab(t("admin_users", L)):
+                            gr.Markdown(f'<div class="section-subtitle">{t("admin_users_subtitle", L)}</div>')
+                            users_table = gr.Dataframe(
+                                headers=["id", "username", "email", "role", "active", "last login"],
+                                interactive=False,
+                            )
+                            users_refresh_btn = gr.Button(t("admin_refresh", L))
+                            with gr.Row():
+                                admin_new_username = gr.Textbox(label=t("admin_username", L), scale=2)
+                                admin_new_email = gr.Textbox(label=t("admin_email", L), scale=3)
+                                admin_new_password = gr.Textbox(label=t("admin_password", L), type="password", scale=2)
+                                admin_new_role = gr.Dropdown(
+                                    choices=["user", "admin"], value="user",
+                                    label=t("admin_role", L), scale=1,
+                                )
+                                admin_add_btn = gr.Button(t("admin_add_user", L), variant="primary", scale=1)
+                            admin_add_status = gr.Markdown("")
+                            with gr.Row():
+                                admin_target_user_id = gr.Textbox(label=t("admin_user_id", L), scale=1)
+                                admin_target_new_pw = gr.Textbox(label=t("admin_new_password", L), type="password", scale=3)
+                                admin_reset_pw_btn = gr.Button(t("admin_reset_pw", L), scale=1)
+                            admin_reset_status = gr.Markdown("")
+
+                        with gr.Tab(t("admin_models", L)):
+                            gr.Markdown(f'<div class="section-subtitle">{t("admin_models_subtitle", L)}</div>')
+                            admin_models_table = gr.Dataframe(
+                                headers=["id", "name", "downloaded", "size_gb", "enabled", "status"],
+                                interactive=False,
+                            )
+                            admin_models_refresh_btn = gr.Button(t("admin_refresh", L))
+                            with gr.Row():
+                                admin_target_model_id = gr.Textbox(label="model id", scale=2)
+                                admin_download_btn = gr.Button(t("admin_download", L), variant="primary", scale=1)
+                            admin_download_status = gr.Markdown("")
+
+                        with gr.Tab(t("admin_stats", L)):
+                            gr.Markdown(f'<div class="section-subtitle">{t("admin_stats_subtitle", L)}</div>')
+                            admin_stats_md = gr.Markdown("")
+                            admin_stats_refresh_btn = gr.Button(t("admin_refresh", L))
+
                 # ----- wiring (inside Blocks context) ----------------------------
 
-                btn.click(login, [u, p, state], [state, signin_panel, signin_banner])
+                btn.click(login, [u, p, state], [state, signin_panel, signin_banner, tab_admin])
+                signup_btn.click(signup_handler, [su_username, su_email, su_password, state],
+                                 [state, signin_panel, signin_banner, tab_admin])
 
                 en_btn.click(lambda s: switch_lang("en", s), [state], [state, en_btn, zh_btn, signin_panel])
                 zh_btn.click(lambda s: switch_lang("zh", s), [state], [state, en_btn, zh_btn, signin_panel])
@@ -793,6 +1026,22 @@ def build_gradio_app(launch: bool = True):
                           [video_out, last_job], [video_out, last_job])
 
                 library_refresh.click(refresh_history, [state], [library_table])
+
+                # ----- admin wiring -----
+                users_refresh_btn.click(refresh_admin_users, [state], [users_table])
+                admin_add_btn.click(admin_add_user,
+                                   [admin_new_username, admin_new_email, admin_new_password, admin_new_role, state],
+                                   [admin_add_status, users_table])
+                admin_reset_pw_btn.click(admin_reset_password,
+                                         [admin_target_user_id, admin_target_new_pw, state],
+                                         [admin_reset_status])
+                admin_models_refresh_btn.click(refresh_admin_models, [state], [admin_models_table])
+                admin_download_btn.click(admin_download_model, [admin_target_model_id, state],
+                                         [admin_download_status])
+                admin_stats_refresh_btn.click(refresh_admin_stats, [state], [admin_stats_md])
+
+                # auto-refresh admin tables when Admin tab is selected (best-effort)
+                tab_admin.select(refresh_admin_users, [state], [users_table], show_progress="hidden")
 
     port = get_settings().app_port_gradio
     if launch:

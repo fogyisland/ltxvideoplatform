@@ -22,8 +22,55 @@ class ApiClient:
         self.token = r.json()["access_token"]
         return self.token
 
+    def signup(self, username: str, email: str, password: str) -> str:
+        r = self._c.post("/api/v1/auth/signup",
+                         json={"username": username, "email": email, "password": password})
+        r.raise_for_status()
+        # sign-up returns a token; auto-login
+        self.token = r.json()["access_token"]
+        return self.token
+
     def me(self) -> dict:
         return self._c.get("/api/v1/auth/me", headers=self._h()).json()
+
+    # ---------- admin ----------
+    def admin_list_users(self) -> list[dict]:
+        return self._c.get("/api/v1/admin/users", headers=self._h()).json()
+
+    def admin_create_user(self, username: str, email: str | None, password: str, role: str = "user") -> dict:
+        body = {"username": username, "password": password, "role": role}
+        if email:
+            body["email"] = email
+        r = self._c.post("/api/v1/admin/users", json=body, headers=self._h())
+        r.raise_for_status(); return r.json()
+
+    def admin_patch_user(self, user_id: int, *, is_active: bool | None = None, role: str | None = None) -> dict:
+        body = {k: v for k, v in {"is_active": is_active, "role": role}.items() if v is not None}
+        r = self._c.patch(f"/api/v1/admin/users/{user_id}", json=body, headers=self._h())
+        r.raise_for_status(); return r.json()
+
+    def admin_delete_user(self, user_id: int) -> None:
+        r = self._c.delete(f"/api/v1/admin/users/{user_id}", headers=self._h())
+        r.raise_for_status()
+
+    def admin_reset_password(self, user_id: int, new_password: str) -> None:
+        r = self._c.post(f"/api/v1/admin/users/{user_id}/reset-password",
+                         json={"new_password": new_password}, headers=self._h())
+        r.raise_for_status()
+
+    def admin_list_models(self) -> list[dict]:
+        return self._c.get("/api/v1/admin/models", headers=self._h()).json()
+
+    def admin_download_model(self, model_id: str) -> dict:
+        r = self._c.post(f"/api/v1/admin/models/{model_id}/download", headers=self._h())
+        r.raise_for_status(); return r.json()
+
+    def admin_download_status(self, model_id: str) -> dict:
+        return self._c.get(f"/api/v1/admin/models/{model_id}/download/status",
+                           headers=self._h()).json()
+
+    def admin_stats(self) -> dict:
+        return self._c.get("/api/v1/admin/stats", headers=self._h()).json()
 
     def list_models(self) -> list[dict]:
         return self._c.get("/api/v1/models", headers=self._h()).json()
