@@ -147,6 +147,8 @@ def list_models_admin(_: User = Depends(require_admin)):
             "default_frames": entry.default_frames,
             "enabled": entry.enabled,
             "description": entry.description,
+            "use_case": entry.use_case,
+            "disk_size_gb": entry.disk_size_gb,
             "checkpoint_path": entry.checkpoint_path,
             "config_path": entry.config_path,
             "downloaded": present,
@@ -171,11 +173,36 @@ def trigger_download(model_id: str, _: User = Depends(require_admin)):
     def _run():
         try:
             from huggingface_hub import snapshot_download
+            import tqdm.auto as tqdm_auto
+
+            class _ProgressTqdm(tqdm_auto.tqdm):
+                """tqdm subclass that pushes byte-level progress into _DOWNLOAD_STATUS."""
+                def __init__(self, *args, **kwargs):
+                    kwargs.setdefault("disable", True)  # no console output
+                    super().__init__(*args, **kwargs)
+                def update(self, n=1):
+                    super().update(n)
+                    if self.total and self.total > 0:
+                        pct = min(self.n / self.total, 1.0)
+                        _DOWNLOAD_STATUS[model_id] = {
+                            "status": "running",
+                            "progress": pct,
+                            "message": f"{self.n / 1e6:.0f} / {self.total / 1e6:.0f} MB · {self.n / max(self.total, 1) * 100:.1f}%",
+                            "current_file": getattr(self, "desc", "") or "",
+                            "bytes_downloaded": self.n,
+                            "bytes_total": self.total,
+                        }
+                def close(self):
+                    super().close()
+
             settings = get_settings()
             target_dir = settings.model_dir_abs / Path(entry.checkpoint_path).parent
             target_dir.mkdir(parents=True, exist_ok=True)
-            _DOWNLOAD_STATUS[model_id] = {"status": "running", "progress": 0.05,
-                                          "message": f"downloading into {target_dir.name}"}
+            _DOWNLOAD_STATUS[model_id] = {
+                "status": "running", "progress": 0.0,
+                "message": f"downloading into {target_dir.name}",
+                "current_file": "", "bytes_downloaded": 0, "bytes_total": 0,
+            }
             snapshot_download(
                 repo_id="Lightricks/LTX-Video",
                 local_dir=str(settings.model_dir_abs),
@@ -184,11 +211,17 @@ def trigger_download(model_id: str, _: User = Depends(require_admin)):
                     f"{Path(entry.checkpoint_path).parent}/**",
                     f"{Path(entry.config_path).parent}/**",
                 ],
+                tqdm_class=_ProgressTqdm,
             )
-            _DOWNLOAD_STATUS[model_id] = {"status": "done", "progress": 1.0, "message": "complete"}
+            _DOWNLOAD_STATUS[model_id] = {"status": "done", "progress": 1.0,
+                                          "message": "complete",
+                                          "current_file": "",
+                                          "bytes_downloaded": 0, "bytes_total": 0}
         except Exception as e:
             _DOWNLOAD_STATUS[model_id] = {"status": "failed", "progress": 0.0,
-                                          "message": f"{type(e).__name__}: {e}"}
+                                          "message": f"{type(e).__name__}: {e}",
+                                          "current_file": "",
+                                          "bytes_downloaded": 0, "bytes_total": 0}
 
     t = threading.Thread(target=_run, daemon=True, name=f"dl-{model_id}")
     t.start()

@@ -58,12 +58,23 @@ export type AdminUser = {
   last_login_at: string | null;
 };
 
+export type DownloadStatus = {
+  status: "idle" | "running" | "done" | "failed";
+  progress: number;        // 0..1
+  message: string;
+  current_file?: string;
+  bytes_downloaded?: number;
+  bytes_total?: number;
+};
+
 export type AdminModel = Model & {
   checkpoint_path: string;
   config_path: string;
   downloaded: boolean;
   size_gb: number;
-  download_status: { status: string; progress: number; message: string };
+  disk_size_gb: number;
+  use_case: string;
+  download_status: DownloadStatus;
 };
 
 export type AdminStats = {

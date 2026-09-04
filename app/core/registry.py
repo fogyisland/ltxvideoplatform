@@ -17,6 +17,8 @@ class ModelEntry:
     vram_gb: int
     enabled: bool
     description: str
+    use_case: str = ""        # e.g. "fast previews", "high quality"
+    disk_size_gb: float = 0.0  # approx on-disk size after snapshot_download
 
 
 @dataclass
@@ -47,6 +49,8 @@ def load(path: Path) -> Registry:
             vram_gb=int(m.get("vram_gb", 16)),
             enabled=bool(m.get("enabled", True)),
             description=m.get("description", ""),
+            use_case=m.get("use_case", ""),
+            disk_size_gb=float(m.get("disk_size_gb", 0.0)),
         )
         for m in raw["models"]
     ]

@@ -157,7 +157,14 @@ export const api = {
 
   async adminDownloadStatus(
     token: string, modelId: string,
-  ): Promise<{ status: string; progress: number; message: string }> {
+  ): Promise<{
+    status: "idle" | "running" | "done" | "failed";
+    progress: number;
+    message: string;
+    current_file?: string;
+    bytes_downloaded?: number;
+    bytes_total?: number;
+  }> {
     return request(`/api/v1/admin/models/${modelId}/download/status`, { token });
   },
 

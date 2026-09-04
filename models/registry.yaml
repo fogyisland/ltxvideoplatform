@@ -1,4 +1,3 @@
-# models/registry.yaml — the canonical 5-model set from spec §9
 models:
   - id: ltx-13b-distilled-fast
     display_name: "LTX-Video 13B Distilled Fast (8x)"
@@ -10,6 +9,8 @@ models:
     vram_gb: 16
     enabled: true
     description: "8x accelerated distilled variant for fast previews"
+    use_case: "fast previews · 5-10s loops · iterative tweaking"
+    disk_size_gb: 28.0
   - id: ltx-13b-distilled
     display_name: "LTX-Video 13B Distilled (Standard)"
     kind: t2v_distilled
@@ -20,6 +21,8 @@ models:
     vram_gb: 16
     enabled: true
     description: "Standard distilled 13B variant"
+    use_case: "general-purpose · high quality shorts"
+    disk_size_gb: 28.0
   - id: ltx-13b-distilled-long-multi-shot
     display_name: "LTX-Video 13B Long Multi-Shot"
     kind: i2v_long
@@ -30,6 +33,8 @@ models:
     vram_gb: 20
     enabled: true
     description: "Long sliding-window multi-shot distilled variant"
+    use_case: "long-form video · 20-30s scenes · last-frame extension"
+    disk_size_gb: 28.0
   - id: ltx-2b-distilled
     display_name: "LTX-Video 2B Distilled"
     kind: t2v_distilled
@@ -40,6 +45,8 @@ models:
     vram_gb: 6
     enabled: true
     description: "Lightweight 2B distilled for low-VRAM machines"
+    use_case: "low-end GPU · 4-8 GB VRAM · quick drafts"
+    disk_size_gb: 5.0
   - id: ltx-13b-full
     display_name: "LTX-Video 13B Full (no distill)"
     kind: t2v_full
@@ -50,3 +57,5 @@ models:
     vram_gb: 28
     enabled: false
     description: "Full 13B checkpoint; highest quality, slowest. Behind advanced toggle."
+    use_case: "maximum fidelity · production renders · 40+ steps"
+    disk_size_gb: 52.0

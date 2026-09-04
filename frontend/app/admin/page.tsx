@@ -5,9 +5,27 @@ import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/lib/i18n";
 import { AppShell } from "@/components/AppShell";
 import { api, ApiError } from "@/lib/api";
-import type { AdminModel, AdminStats, AdminUser } from "@/lib/types";
+import type { AdminModel, AdminStats, AdminUser, DownloadStatus } from "@/lib/types";
 
 type Tab = "users" | "models" | "stats";
+
+function formatBytes(n?: number): string {
+  if (n == null) return "—";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function renderStatusBadge(status: string | undefined) {
+  const s = status ?? "idle";
+  const label =
+    s === "running" ? "downloading" :
+    s === "done" ? "complete" :
+    s === "failed" ? "failed" :
+    "idle";
+  return <span className="ltx-pill" data-status={s}>{label}</span>;
+}
 
 export default function AdminPage() {
   const { token, loading, user } = useAuth();
@@ -23,7 +41,7 @@ export default function AdminPage() {
   const [targetId, setTargetId] = useState("");
   const [newPw, setNewPw] = useState("");
   const [targetModelId, setTargetModelId] = useState("");
-  const [downloadStatus, setDownloadStatus] = useState<string>("");
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatus | null>(null);
   const [feedback, setFeedback] = useState<string>("");
 
   useEffect(() => {
@@ -39,6 +57,24 @@ export default function AdminPage() {
     api.adminListModels(token).then(setModels).catch(() => setModels([]));
     api.adminStats(token).then(setStats).catch(() => setStats(null));
   }, [token, user]);
+
+  // Poll download status while a download is running
+  useEffect(() => {
+    if (!token || !targetModelId) return;
+    if (downloadStatus?.status !== "running") return;
+    const interval = setInterval(async () => {
+      try {
+        const s = await api.adminDownloadStatus(token, targetModelId);
+        setDownloadStatus(s);
+        if (s.status !== "running") {
+          // refresh model list to show updated size_gb
+          api.adminListModels(token).then(setModels).catch(() => {});
+          clearInterval(interval);
+        }
+      } catch { /* ignore transient errors */ }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [token, targetModelId, downloadStatus?.status]);
 
   if (loading || !user || !token) return null;
   if (user.role !== "admin") return null;
@@ -84,12 +120,12 @@ export default function AdminPage() {
 
   const downloadModel = async () => {
     if (!targetModelId) return;
-    setDownloadStatus("starting…");
     try {
-      const r = await api.adminDownloadModel(token!, targetModelId);
-      setDownloadStatus(`status: ${r.status}`);
+      await api.adminDownloadModel(token!, targetModelId);
+      const s = await api.adminDownloadStatus(token!, targetModelId);
+      setDownloadStatus(s);
     } catch (e) {
-      setDownloadStatus(e instanceof ApiError ? `✗ ${e.message}` : `✗ ${e}`);
+      setFeedback(e instanceof ApiError ? `✗ ${e.message}` : `✗ ${e}`);
     }
   };
 
@@ -208,15 +244,42 @@ export default function AdminPage() {
               <button type="button" onClick={downloadModel} className="ltx-primary">{t("admin_download")}</button>
             </div>
             {downloadStatus && (
-              <div className="ltx-pill" style={{ marginTop: 8, display: "inline-block" }}>{downloadStatus}</div>
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--ink-1)", marginBottom: 4 }}>
+                  <span>
+                    {downloadStatus.status === "running" && t("admin_download_progress")}
+                    {downloadStatus.status === "done" && t("admin_download_complete")}
+                    {downloadStatus.status === "failed" && t("admin_download_failed")}
+                    {downloadStatus.status === "idle" && t("admin_idle")}
+                  </span>
+                  <span>
+                    {downloadStatus.bytes_downloaded != null && downloadStatus.bytes_total != null
+                      ? `${formatBytes(downloadStatus.bytes_downloaded)} / ${formatBytes(downloadStatus.bytes_total)}`
+                      : `${Math.round(downloadStatus.progress * 100)}%`}
+                  </span>
+                </div>
+                <div className="ltx-progress">
+                  <div style={{ width: `${Math.round(downloadStatus.progress * 100)}%` }} />
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-2)" }}>
+                  {downloadStatus.message}
+                  {downloadStatus.current_file && <> · <code>{downloadStatus.current_file}</code></>}
+                </div>
+              </div>
             )}
           </div>
 
           <table className="ltx-table">
             <thead>
               <tr>
-                <th>{t("admin_id")}</th><th>{t("admin_name")}</th><th>{t("admin_downloaded")}</th>
-                <th>{t("admin_size")}</th><th>{t("admin_enabled")}</th><th>{t("admin_status")}</th>
+                <th>{t("admin_id")}</th>
+                <th>{t("admin_name")}</th>
+                <th>{t("admin_use_case")}</th>
+                <th>{t("admin_vram")}</th>
+                <th>{t("admin_disk_size")}</th>
+                <th>{t("admin_downloaded")}</th>
+                <th>{t("admin_enabled")}</th>
+                <th>{t("admin_status")}</th>
               </tr>
             </thead>
             <tbody>
@@ -224,10 +287,12 @@ export default function AdminPage() {
                 <tr key={m.id}>
                   <td><code>{m.id}</code></td>
                   <td>{m.display_name}</td>
-                  <td>{m.downloaded ? "✓" : "—"}</td>
-                  <td>{m.downloaded ? `${m.size_gb} GB` : "—"}</td>
+                  <td style={{ fontSize: 11, color: "var(--ink-1)" }}>{m.use_case || "—"}</td>
+                  <td>{m.vram_gb} GB</td>
+                  <td>~{m.disk_size_gb} GB</td>
+                  <td>{m.downloaded ? `✓ ${m.size_gb} GB` : "—"}</td>
                   <td>{m.enabled ? "yes" : "no"}</td>
-                  <td>{m.download_status?.status ?? ""}</td>
+                  <td>{renderStatusBadge(m.download_status?.status)}</td>
                 </tr>
               ))}
             </tbody>

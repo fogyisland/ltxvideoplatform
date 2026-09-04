@@ -27,3 +27,6 @@ next-env.d.ts
 .DS_Store
 .vscode/
 .idea/
+
+# Runtime artifacts (logs + pid files from start_all.py)
+.run/

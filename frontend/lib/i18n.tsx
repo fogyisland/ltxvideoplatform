@@ -104,6 +104,13 @@ const I18N: Record<Lang, Dict> = {
     admin_size: "size",
     admin_enabled: "enabled",
     admin_status: "status",
+    admin_use_case: "use case",
+    admin_disk_size: "disk",
+    admin_vram: "VRAM",
+    admin_download_progress: "downloading",
+    admin_download_complete: "complete",
+    admin_download_failed: "failed",
+    admin_idle: "idle",
   },
   zh: {
     app_name: "LTX 工作室",
@@ -198,6 +205,13 @@ const I18N: Record<Lang, Dict> = {
     admin_size: "大小",
     admin_enabled: "启用",
     admin_status: "状态",
+    admin_use_case: "使用场景",
+    admin_disk_size: "磁盘",
+    admin_vram: "显存",
+    admin_download_progress: "下载中",
+    admin_download_complete: "完成",
+    admin_download_failed: "失败",
+    admin_idle: "空闲",
   },
 };
 
