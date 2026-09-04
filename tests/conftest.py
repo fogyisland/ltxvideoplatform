@@ -33,3 +33,42 @@ def db_session():
         session.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    """FastAPI TestClient with a fresh DB and seeded admin user."""
+    from app.config import get_settings
+    from app.db.session import Base, get_engine, SessionLocal
+    from app.db.models import User, Role
+    from app.auth.passwords import hash_password
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path / "models"))
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    monkeypatch.setenv("ADMIN_PASSWORD", "admin")
+    get_settings.cache_clear()
+
+    # Reset the schema to guarantee a clean DB across test runs.
+    engine = get_engine()
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
+
+    with SessionLocal() as s:
+        s.add(User(username="admin", password_hash=hash_password("admin"),
+                   role=Role.admin, is_active=True))
+        s.commit()
+
+    from app.main import build_app
+    from fastapi.testclient import TestClient
+
+    return TestClient(build_app())
+
+
+@pytest.fixture
+def auth_headers(client):
+    """Authorization headers for the seeded admin user."""
+    r = client.post("/api/v1/auth/login", data={"username": "admin", "password": "admin"})
+    assert r.status_code == 200, r.text
+    tok = r.json()["access_token"]
+    return {"Authorization": f"Bearer {tok}"}
