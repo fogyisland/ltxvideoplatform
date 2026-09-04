@@ -34,7 +34,7 @@ class Registry:
 
 
 def load(path: Path) -> Registry:
-    raw = yaml.safe_load(path.read_text())
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     entries = [
         ModelEntry(
             id=m["id"],
