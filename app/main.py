@@ -12,7 +12,7 @@ from fastapi import FastAPI
 
 def build_app() -> FastAPI:
     from fastapi.middleware.cors import CORSMiddleware
-    from app.api import auth, models, uploads, generation, jobs, history, files as files_api, admin as admin_api
+    from app.api import auth, models, uploads, generation, jobs, history, files as files_api, admin as admin_api, projects as projects_api
 
     app = FastAPI(title="LTX-Video Web Platform", version="0.1.0")
     # CORS for browser clients (Next.js frontend on a different port)
@@ -31,6 +31,7 @@ def build_app() -> FastAPI:
     app.include_router(history.router)
     app.include_router(files_api.router)
     app.include_router(admin_api.router)
+    app.include_router(projects_api.router)
     return app
 
 

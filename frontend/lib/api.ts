@@ -1,6 +1,6 @@
 // lib/api.ts — typed wrapper over the FastAPI backend.
 import type {
-  AdminModel, AdminStats, AdminUser, Job, JobSummary, Model, User,
+  AdminModel, AdminStats, AdminUser, Job, JobSummary, Model, Project, ProjectSummary, Scene, User,
 } from "./types";
 
 export class ApiError extends Error {
@@ -174,12 +174,63 @@ export const api = {
 
   // helpers
   resultUrl(token: string, jobId: string): string {
-    const base = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+    const base = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:3381";
     return `${base}/api/v1/jobs/${jobId}/result`;
   },
 
   previewUrl(token: string, jobId: string): string {
-    const base = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+    const base = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:3381";
     return `${base}/api/v1/jobs/${jobId}/preview`;
+  },
+
+  // ---------- projects / scenes ----------
+  async listProjects(token: string): Promise<ProjectSummary[]> {
+    return request<ProjectSummary[]>("/api/v1/projects", { token });
+  },
+
+  async createProject(token: string, body: { title: string; style?: string; model_id?: string }): Promise<Project> {
+    return request<Project>("/api/v1/projects", { method: "POST", body, token });
+  },
+
+  async getProject(token: string, id: string): Promise<Project> {
+    return request<Project>(`/api/v1/projects/${id}`, { token });
+  },
+
+  async patchProject(token: string, id: string, body: Partial<Pick<Project, "title" | "style" | "model_id" | "status">>): Promise<Project> {
+    return request<Project>(`/api/v1/projects/${id}`, { method: "PATCH", body, token });
+  },
+
+  async deleteProject(token: string, id: string): Promise<void> {
+    await request(`/api/v1/projects/${id}`, { method: "DELETE", token });
+  },
+
+  async addScene(token: string, projectId: string, body: { prompt?: string; image_upload_id?: string | null; duration?: string; quality?: string; position?: number }): Promise<Scene> {
+    return request<Scene>(`/api/v1/projects/${projectId}/scenes`, { method: "POST", body, token });
+  },
+
+  async patchScene(token: string, projectId: string, sceneId: string, body: Partial<Pick<Scene, "prompt" | "image_upload_id" | "duration" | "quality" | "position">>): Promise<Scene> {
+    return request<Scene>(`/api/v1/projects/${projectId}/scenes/${sceneId}`, { method: "PATCH", body, token });
+  },
+
+  async deleteScene(token: string, projectId: string, sceneId: string): Promise<void> {
+    await request(`/api/v1/projects/${projectId}/scenes/${sceneId}`, { method: "DELETE", token });
+  },
+
+  async reorderScenes(token: string, projectId: string, sceneIds: string[]): Promise<Project> {
+    return request<Project>(`/api/v1/projects/${projectId}/scenes/reorder`, {
+      method: "POST", body: { scene_ids: sceneIds }, token,
+    });
+  },
+
+  async generateScene(token: string, projectId: string, sceneId: string): Promise<Scene> {
+    return request<Scene>(`/api/v1/projects/${projectId}/scenes/${sceneId}/generate`, {
+      method: "POST", token,
+    });
+  },
+
+  sceneVideoUrl(token: string, projectId: string, sceneId: string): string {
+    const base = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:3381";
+    return `${base}/api/v1/files/outputs/${token ? `?token=` : ""}`;
+    // simpler: clients fetch via auth header; actual fetch done by callers
   },
 };

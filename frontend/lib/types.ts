@@ -77,6 +77,45 @@ export type AdminModel = Model & {
   download_status: DownloadStatus;
 };
 
+export type ProjectStatus = "draft" | "rendering" | "done" | "archived";
+export type SceneStatus = "draft" | "queued" | "running" | "succeeded" | "failed" | "skipped";
+
+export type Scene = {
+  id: string;
+  project_id: string;
+  position: number;
+  prompt: string;
+  image_upload_id: string | null;
+  duration: string;
+  quality: string;
+  status: SceneStatus;
+  job_id: string | null;
+  output_path: string | null;
+  error: string | null;
+  created_at: string;
+};
+
+export type ProjectSummary = {
+  id: string;
+  title: string;
+  style: string;
+  status: ProjectStatus;
+  scene_count: number;
+  succeeded_count: number;
+  updated_at: string;
+};
+
+export type Project = {
+  id: string;
+  title: string;
+  style: string;
+  model_id: string;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+  scenes: Scene[];
+};
+
 export type AdminStats = {
   gpu: { name: string | null; vram_used_gb: number; vram_total_gb: number; available: boolean };
   disk: {

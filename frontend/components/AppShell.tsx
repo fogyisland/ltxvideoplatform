@@ -63,6 +63,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Link href="/create" className={navCls("/create")} style={{ textDecoration: "none" }}>
           {t("nav_create")}
         </Link>
+        <Link href="/projects" className={navCls("/projects")} style={{ textDecoration: "none" }}>
+          {t("nav_projects")}
+        </Link>
         <Link href="/library" className={navCls("/library")} style={{ textDecoration: "none" }}>
           {t("nav_library")}
         </Link>

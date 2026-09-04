@@ -9,6 +9,7 @@ const I18N: Record<Lang, Dict> = {
     app_name: "LTX Studio",
     // navigation
     nav_create: "Create",
+    nav_projects: "Projects",
     nav_library: "Library",
     nav_admin: "Admin",
     nav_signout: "Sign out",
@@ -115,6 +116,7 @@ const I18N: Record<Lang, Dict> = {
   zh: {
     app_name: "LTX 工作室",
     nav_create: "创作",
+    nav_projects: "项目",
     nav_library: "作品库",
     nav_admin: "管理",
     nav_signout: "退出",
