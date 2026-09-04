@@ -116,20 +116,39 @@ def start_api(no_gpu: bool) -> int:
 
 def start_web() -> int:
     pid = pid_alive(WEB_PIDFILE)
-    if pid is not None:
-        print(f"[web] already running (pid {pid})")
-        return pid
-    env = os.environ.copy()
-    # Make sure frontend can find its node_modules
     frontend_dir = ROOT / "frontend"
-    # Build first if .next missing
-    if not (frontend_dir / ".next").exists():
-        print("[web] building (first run)...")
-        subprocess.run(["npm", "run", "build"], cwd=str(frontend_dir), check=True, shell=True)
+    env_local = frontend_dir / ".env.local"
+    next_dir = frontend_dir / ".next"
+    env_local_mtime = env_local.stat().st_mtime if env_local.exists() else 0
+    next_mtime = next_dir.stat().st_mtime if next_dir.exists() else 0
+    needs_build = (
+        not next_dir.exists() or
+        (env_local.exists() and env_local_mtime > next_mtime) or
+        # config files / sources affect build
+        any(
+            (frontend_dir / f).stat().st_mtime > next_mtime
+            for f in ("package.json", "next.config.ts", "tsconfig.json", "tailwind.config.ts")
+            if (frontend_dir / f).exists()
+        )
+    )
+    if pid is not None:
+        if needs_build:
+            print(f"[web] running (pid {pid}) but .env.local or config changed -> restarting")
+            stop_pidfile(WEB_PIDFILE, "web")
+            pid = None
+        else:
+            print(f"[web] already running (pid {pid})")
+            return pid
+    if needs_build:
+        print("[web] building...")
+        r = subprocess.run(["npm", "run", "build"], cwd=str(frontend_dir), shell=True)
+        if r.returncode != 0:
+            print(f"[web] build failed (exit {r.returncode})")
+            return -1
     log = open(WEB_LOG, "ab")
     proc = subprocess.Popen(
         ["npm", "start"], cwd=str(frontend_dir),
-        env=env, stdout=log, stderr=log, shell=True,
+        env=os.environ.copy(), stdout=log, stderr=log, shell=True,
     )
     WEB_PIDFILE.write_text(str(proc.pid))
     print(f"[web] starting (pid {proc.pid})...")
