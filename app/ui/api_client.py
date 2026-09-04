@@ -40,6 +40,10 @@ class ApiClient:
         r = self._c.post("/api/v1/t2v", json=kw, headers=self._h())
         r.raise_for_status(); return r.json()["job_id"]
 
+    def submit_long_video(self, **kw) -> str:
+        # Long-video is just T2V with temporal_tile_size + temporal_overlap set
+        return self.submit_t2v(**kw)
+
     def submit_i2v(self, **kw) -> str:
         r = self._c.post("/api/v1/i2v", json=kw, headers=self._h())
         r.raise_for_status(); return r.json()["job_id"]

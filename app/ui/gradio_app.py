@@ -57,6 +57,20 @@ def build_gradio_app(launch: bool = True):
             raise gr.Error(j.get("error") or j["status"])
         return c.result_url(job_id)
 
+    def do_long_video(model_id, prompt, steps, frames, tile_size, overlap, state, progress=gr.Progress()):
+        c = _client(state)
+        def _cb(j):
+            progress(j["progress"], desc=f"{j['stage']} ({j['status']})")
+        job_id = c.submit_long_video(model_id=model_id, prompt=prompt, num_frames=int(frames),
+                                     height=480, width=768,
+                                     num_inference_steps=int(steps), guidance_scale=5.0, fps=24,
+                                     temporal_tile_size=int(tile_size),
+                                     temporal_overlap=int(overlap))
+        j = c.wait_job(job_id, on_progress=_cb)
+        if j["status"] != "succeeded":
+            raise gr.Error(j.get("error") or j["status"])
+        return c.result_url(job_id)
+
     def refresh_models(state):
         c = _client(state)
         ids = [m["id"] for m in c.list_models() if m["enabled"]]
@@ -119,7 +133,7 @@ def build_gradio_app(launch: bool = True):
                 lrun = gr.Button("Generate", variant="primary")
                 lvideo = gr.Video()
                 lrefresh.click(refresh_models, [state], [lmp])
-                lrun.click(do_t2v, [lmp, lprompt, lsteps, lframes, gr.State(480), gr.State(768), state], [lvideo])
+                lrun.click(do_long_video, [lmp, lprompt, lsteps, lframes, ltile, loverlap, state], [lvideo])
 
             with gr.Tab("Generate — Extend (last-frame)"):
                 ep = gr.Textbox(label="parent job_id")
