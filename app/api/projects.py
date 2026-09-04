@@ -393,3 +393,91 @@ def _extract_last_frame_bytes(mp4_path: Path) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+# ---------- Phase 2: timeline / concat ----------
+
+class ConcatIn(BaseModel):
+    scene_ids: list[str] | None = None  # default: all succeeded in order
+
+
+class ConcatOut(BaseModel):
+    project_id: str
+    final_path: str
+    scene_count: int
+    total_seconds: float
+
+
+def _concat_mp4s(mp4_paths: list[Path], output_path: Path) -> float:
+    """Concatenate MP4 files using ffmpeg. Returns total seconds."""
+    import subprocess as _sp
+    # ffmpeg concat demuxer (requires identical codec/parameters; LTX outputs are uniform)
+    list_file = output_path.with_suffix(".concat.txt")
+    try:
+        with open(list_file, "w", encoding="utf-8") as fh:
+            for p in mp4_paths:
+                # escape single quotes for ffmpeg concat syntax
+                esc = str(p).replace("'", "'\\''")
+                fh.write(f"file '{esc}'\n")
+        # probe total duration first
+        total = 0.0
+        for p in mp4_paths:
+            r = _sp.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", str(p)],
+                capture_output=True, text=True, timeout=30,
+            )
+            try:
+                total += float(r.stdout.strip())
+            except (ValueError, AttributeError):
+                total += 0.0
+        # run concat
+        r = _sp.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+             "-c", "copy", str(output_path)],
+            capture_output=True, text=True, timeout=600,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(f"ffmpeg concat failed (rc={r.returncode}): {r.stderr[-500:]}")
+        return total
+    finally:
+        try: list_file.unlink()
+        except Exception: pass
+
+
+@router.post("/{project_id}/concat", response_model=ConcatOut)
+def concat_project(project_id: str, body: ConcatIn,
+                  user: User = Depends(current_user), db: Session = Depends(get_db)):
+    p = _owns(project_id, user, db)
+    if body.scene_ids is not None:
+        # preserve order from input
+        by_id = {s.id: s for s in p.scenes}
+        scenes = [by_id[sid] for sid in body.scene_ids if sid in by_id]
+    else:
+        # default: all succeeded in position order
+        scenes = sorted([s for s in p.scenes if s.status == SceneStatus.succeeded],
+                        key=lambda x: x.position)
+    if not scenes:
+        raise HTTPException(400, "no succeeded scenes to concatenate")
+    missing = [s.id for s in scenes if not s.output_path]
+    if missing:
+        raise HTTPException(400, f"scenes not yet rendered: {missing}")
+
+    settings = get_settings()
+    project_dir = settings.data_dir_abs / "outputs" / str(user.id) / "projects" / p.id
+    project_dir.mkdir(parents=True, exist_ok=True)
+    final_path = project_dir / "final.mp4"
+
+    mp4_paths = [settings.data_dir_abs / s.output_path for s in scenes]
+    try:
+        total = _concat_mp4s(mp4_paths, final_path)
+    except FileNotFoundError as e:
+        raise HTTPException(500, f"ffmpeg not found: install ffmpeg and add to PATH")
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+    rel = final_path.relative_to(settings.data_dir_abs)
+    p.status = ProjectStatus.done
+    p.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return ConcatOut(project_id=p.id, final_path=str(rel), scene_count=len(scenes), total_seconds=total)

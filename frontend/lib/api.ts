@@ -228,6 +228,19 @@ export const api = {
     });
   },
 
+  async concatProject(token: string, projectId: string, sceneIds?: string[]): Promise<{
+    project_id: string;
+    final_path: string;
+    scene_count: number;
+    total_seconds: number;
+  }> {
+    return request(`/api/v1/projects/${projectId}/concat`, {
+      method: "POST",
+      body: { scene_ids: sceneIds },
+      token,
+    });
+  },
+
   sceneVideoUrl(token: string, projectId: string, sceneId: string): string {
     const base = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:3381";
     return `${base}/api/v1/files/outputs/${token ? `?token=` : ""}`;

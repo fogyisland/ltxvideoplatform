@@ -3,6 +3,148 @@ import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { AppShell } from "@/components/AppShell";
+
+// ---------- TimelineStrip component (Phase 2) ----------
+
+function TimelineStrip({
+  scenes, activeId, onSelect, apiBase, token, projectId, onConcatComplete,
+}: {
+  scenes: Scene[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  apiBase: string;
+  token: string;
+  projectId: string;
+  onConcatComplete: () => void;
+}) {
+  const [concating, setConcating] = useState(false);
+  const [finalPath, setFinalPath] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const succeeded = scenes.filter((s) => s.status === "succeeded");
+  const canConcat = succeeded.length >= 2;
+
+  const doConcat = async () => {
+    if (!canConcat) return;
+    setErr(null);
+    setConcating(true);
+    try {
+      const r = await api.concatProject(token, projectId);
+      setFinalPath(r.final_path);
+      onConcatComplete();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setConcating(false);
+    }
+  };
+
+  return (
+    <div className="ltx-card" style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+          Timeline · {scenes.length} {scenes.length === 1 ? "scene" : "scenes"}
+          {succeeded.length > 0 && (
+            <span style={{ marginLeft: 8, fontSize: 12, color: "var(--ink-2)", fontWeight: 400 }}>
+              ({succeeded.length} ready to concat)
+            </span>
+          )}
+        </h3>
+        <button
+          type="button"
+          onClick={doConcat}
+          disabled={!canConcat || concating}
+          className="ltx-primary"
+          style={{ padding: "8px 16px", fontSize: 13 }}
+          title={!canConcat ? "need at least 2 succeeded scenes" : ""}
+        >
+          {concating ? "concatenating…" : "concat all → final.mp4"}
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 8 }}>
+        {scenes.map((s, i) => {
+          const isActive = activeId === s.id;
+          const hasVideo = s.status === "succeeded" && s.job_id;
+          return (
+            <div
+              key={s.id}
+              onClick={() => onSelect(s.id)}
+              style={{
+                flex: "0 0 160px",
+                cursor: "pointer",
+                border: isActive ? "2px solid var(--ink-0)" : "1px solid var(--line)",
+                borderRadius: 6,
+                background: "var(--bg-1)",
+                overflow: "hidden",
+                opacity: s.status === "succeeded" ? 1 : s.status === "running" || s.status === "queued" ? 0.7 : 0.4,
+              }}
+            >
+              <div style={{ position: "relative", background: "#000", aspectRatio: "16/9" }}>
+                {hasVideo ? (
+                  <video
+                    src={`${apiBase}/api/v1/jobs/${s.job_id}/result`}
+                    muted
+                    preload="metadata"
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  />
+                ) : (
+                  <div style={{
+                    position: "absolute", inset: 0, display: "flex",
+                    alignItems: "center", justifyContent: "center",
+                    color: "var(--ink-2)", fontSize: 11,
+                  }}>
+                    {s.status === "running" || s.status === "queued" ? "⏳" : s.status === "failed" ? "✗" : "—"}
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: "6px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)" }}>{i + 1}</span>
+                <span style={{
+                  flex: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis",
+                  whiteSpace: "nowrap", color: "var(--ink-0)",
+                }}>
+                  {s.prompt.slice(0, 18) || <em style={{ color: "var(--ink-2)" }}>—</em>}
+                </span>
+                <span
+                  className="ltx-pill"
+                  data-status={
+                    s.status === "succeeded" ? "succeeded" :
+                    s.status === "failed" ? "failed" :
+                    s.status === "running" || s.status === "queued" ? "running" : undefined
+                  }
+                  style={{ fontSize: 9 }}
+                >
+                  {s.status === "running" || s.status === "queued" ? "..." : s.status}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {err && (
+        <div className="ltx-pill" data-status="failed" style={{ display: "block", padding: "8px 12px", marginTop: 8 }}>
+          {err}
+        </div>
+      )}
+
+      {finalPath && (
+        <div style={{ marginTop: 12 }}>
+          <p className="ltx-section-subtitle" style={{ marginBottom: 8 }}>Final video</p>
+          <video
+            src={`${apiBase}/api/v1/files/${finalPath}`}
+            controls
+            style={{ width: "100%", maxWidth: 640, borderRadius: 8, background: "#000" }}
+          />
+          <p style={{ fontSize: 11, color: "var(--ink-2)", marginTop: 6 }}>
+            <code>{finalPath}</code>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 import { api, ApiError } from "@/lib/api";
 import type { Project, Scene } from "@/lib/types";
 
@@ -330,6 +472,17 @@ export default function ProjectEditorPage({ params }: { params: Promise<{ id: st
           )}
         </div>
       </div>
+
+      {/* TIMELINE (Phase 2) */}
+      <TimelineStrip
+        scenes={sortedScenes}
+        activeId={activeId}
+        onSelect={setActiveId}
+        apiBase={sceneBase}
+        token={token!}
+        projectId={id}
+        onConcatComplete={refresh}
+      />
 
       <p style={{ marginTop: 24, fontSize: 12, color: "var(--ink-2)" }}>
         Note: scenes chain by last-frame → first-frame, so the order matters. Generate sequentially for coherent visual flow.
