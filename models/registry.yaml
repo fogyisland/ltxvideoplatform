@@ -1,0 +1,52 @@
+# models/registry.yaml — the canonical 5-model set from spec §9
+models:
+  - id: ltx-13b-distilled-fast
+    display_name: "LTX-Video 13B Distilled Fast (8x)"
+    kind: t2v_distilled
+    checkpoint_path: ltx-video-13b-distilled-fast/ltxv-13b-256-distilled.safetensors
+    config_path: ltx-video-13b-distilled-fast/ltxv-13b-256-distilled.yaml
+    default_steps: 8
+    default_frames: 121
+    vram_gb: 16
+    enabled: true
+    description: "8x accelerated distilled variant for fast previews"
+  - id: ltx-13b-distilled
+    display_name: "LTX-Video 13B Distilled (Standard)"
+    kind: t2v_distilled
+    checkpoint_path: ltx-video-13b-distilled/ltxv-13b-256-distilled.safetensors
+    config_path: ltx-video-13b-distilled/ltxv-13b-256-distilled.yaml
+    default_steps: 20
+    default_frames: 121
+    vram_gb: 16
+    enabled: true
+    description: "Standard distilled 13B variant"
+  - id: ltx-13b-distilled-long-multi-shot
+    display_name: "LTX-Video 13B Long Multi-Shot"
+    kind: i2v_long
+    checkpoint_path: ltx-video-13b-distilled-long-multi-shot/model.safetensors
+    config_path: ltx-video-13b-distilled-long-multi-shot/config.yaml
+    default_steps: 30
+    default_frames: 161
+    vram_gb: 20
+    enabled: true
+    description: "Long sliding-window multi-shot distilled variant"
+  - id: ltx-2b-distilled
+    display_name: "LTX-Video 2B Distilled"
+    kind: t2v_distilled
+    checkpoint_path: ltx-video-2b-distilled/model.safetensors
+    config_path: ltx-video-2b-distilled/config.yaml
+    default_steps: 8
+    default_frames: 97
+    vram_gb: 6
+    enabled: true
+    description: "Lightweight 2B distilled for low-VRAM machines"
+  - id: ltx-13b-full
+    display_name: "LTX-Video 13B Full (no distill)"
+    kind: t2v_full
+    checkpoint_path: ltx-video-13b-full/ltxv-13b-256-full.safetensors
+    config_path: ltx-video-13b-full/ltxv-13b-256-full.yaml
+    default_steps: 40
+    default_frames: 121
+    vram_gb: 28
+    enabled: false
+    description: "Full 13B checkpoint; highest quality, slowest. Behind advanced toggle."
