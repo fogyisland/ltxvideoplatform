@@ -10,6 +10,7 @@ pytestmark = pytest.mark.gpu
 def server(tmp_path_factory):
     import subprocess, os, signal
     import sys
+    from pathlib import Path
     tmp = tmp_path_factory.mktemp("gpu")
     env = os.environ.copy()
     env.update({
@@ -18,9 +19,15 @@ def server(tmp_path_factory):
         "JWT_SECRET": "x" * 32,
         "ADMIN_PASSWORD": "admin",
     })
+    # Skip cleanly if the 2B-distilled checkpoint is missing (avoids 240 s hang waiting for it)
+    model_dir = Path(env["MODEL_DIR"])
+    expected = model_dir / "ltx-video-2b-distilled" / "model.safetensors"
+    if not expected.exists():
+        pytest.skip(f"checkpoint missing: {expected} — run scripts/download_models.py --model ltx-2b-distilled")
+    # DEVNULL for stdout/stderr prevents pipe-buffer deadlock (Linux pipe ~64 KB; CUDA init + Gradio banner can wedge)
     p = subprocess.Popen([sys.executable, "-m", "app.main"], env=env,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    # wait for /healthz
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # wait for /api/v1/models to respond (with or without auth)
     for _ in range(60):
         try:
             r = requests.get("http://127.0.0.1:8000/api/v1/models", timeout=1)
@@ -28,9 +35,21 @@ def server(tmp_path_factory):
                 break
         except Exception:
             time.sleep(1)
+    else:
+        p.kill()
+        pytest.fail("server did not start within 60s")
     yield p
-    p.send_signal(signal.SIGTERM)
-    p.wait(timeout=10)
+    # Robust teardown: SIGTERM -> wait -> terminate -> kill
+    try:
+        p.send_signal(signal.SIGTERM)
+        p.wait(timeout=5)
+    except (subprocess.TimeoutExpired, OSError):
+        try:
+            p.terminate()
+            p.wait(timeout=3)
+        except Exception:
+            p.kill()
+            p.wait()
 
 
 def test_real_t2v_2b(server):
@@ -38,6 +57,7 @@ def test_real_t2v_2b(server):
     tok = requests.post("http://127.0.0.1:8000/api/v1/auth/login",
                         data={"username": "admin", "password": "admin"}).json()["access_token"]
     h = {"Authorization": f"Bearer {tok}"}
+
     # 2B distilled with minimal settings — assumes checkpoint exists
     r = requests.post("http://127.0.0.1:8000/api/v1/t2v", json={
         "model_id": "ltx-2b-distilled",
