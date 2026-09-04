@@ -34,7 +34,7 @@ WEB_PIDFILE = RUN_DIR / "web.pid"
 API_LOG = RUN_DIR / "api.log"
 WEB_LOG = Path(os.environ.get("TEMP", "/tmp")) / "next_3380.log"
 
-API_PORT = 8000
+API_PORT = 3381
 WEB_PORT = 3380
 
 
@@ -56,14 +56,30 @@ def wait_for_port(host: str, port: int, timeout: float = 30.0) -> bool:
 
 
 def pid_alive(pidfile: Path) -> int | None:
+    """Cross-platform check: is the PID in pidfile still a running process?"""
     if not pidfile.exists():
         return None
     try:
         pid = int(pidfile.read_text().strip())
-        # os.kill(pid, 0) raises if process is gone
-        os.kill(pid, 0)
-        return pid
-    except (ValueError, OSError, ProcessLookupError):
+    except (ValueError, OSError):
+        pidfile.unlink(missing_ok=True)
+        return None
+    # Best-effort: try psutil-style check via subprocess (Windows-safe)
+    try:
+        if sys.platform == "win32":
+            # tasklist filters by PID; non-zero exit means no such process
+            r = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if str(pid) in r.stdout:
+                return pid
+            pidfile.unlink(missing_ok=True)
+            return None
+        else:
+            os.kill(pid, 0)
+            return pid
+    except Exception:
         pidfile.unlink(missing_ok=True)
         return None
 
