@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.auth.deps import current_user
@@ -66,5 +66,11 @@ def get_preview(job_id: str, u: User = Depends(current_user), db: Session = Depe
     if not j.preview_path:
         raise HTTPException(404, "no preview yet")
     s = get_settings()
-    p = s.data_dir_abs / j.preview_path
+    p = (s.data_dir_abs / j.preview_path).resolve()
+    try:
+        p.relative_to(s.data_dir_abs)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bad path")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="preview not found")
     return FileResponse(p, media_type="image/png")
