@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltxvideo-web"
+version = "0.1.0"
+description = "Web platform wrapping LTX-Video for small teams"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "gradio>=4.20",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "passlib[bcrypt]>=1.7.4",
+  "python-jose[cryptography]>=3.3",
+  "python-multipart>=0.0.9",
+  "httpx>=0.27",
+  "imageio[ffmpeg]>=2.34",
+  "Pillow>=10.0",
+  "ulid-py>=1.1",
+  "pyyaml>=6.0",
+  "huggingface-hub>=0.22",
+  "torch>=2.2",
+  # LTX-Video is installed from source in Task 4; placeholder for ordering
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "respx>=0.21",
+  "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "gpu: real-GPU tests (deselect with -m 'not gpu')",
+]
