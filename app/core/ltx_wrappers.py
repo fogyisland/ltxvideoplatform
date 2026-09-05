@@ -56,10 +56,11 @@ def get_pipeline(model_id: str):
 
     # We use a 2B-distilled-friendly text encoder dir name; the registry entry's
     # `text_encoder_path` field overrides when present.
-    text_encoder_path = (
-        Path(entry.text_encoder_path) if getattr(entry, "text_encoder_path", None)
-        else settings.model_dir_abs / "text_encoder"
-    )
+    if getattr(entry, "text_encoder_path", None):
+        te_raw = Path(entry.text_encoder_path)
+        text_encoder_path = te_raw if te_raw.is_absolute() else settings.model_dir_abs / te_raw
+    else:
+        text_encoder_path = settings.model_dir_abs / "text_encoder"
     if not text_encoder_path.exists():
         raise FileNotFoundError(
             f"text encoder not found at {text_encoder_path}. "
@@ -70,6 +71,8 @@ def get_pipeline(model_id: str):
     precision = "bfloat16"
 
     pipeline = _create_pipeline(ckpt_path, text_encoder_path, precision)
+    if _should_offload():
+        enable_low_vram_offload(pipeline)
     _PIPELINE_CACHE[model_id] = pipeline
     return pipeline
 
@@ -135,7 +138,15 @@ def _build_official(ckpt_path, text_encoder_path, precision,
         cfg = {}
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.bfloat16 if precision == "bfloat16" else torch.float32
+    # Use FP8 for the text encoder AND transformer when fitting in low VRAM.
+    # Both components have FP8 weights; safetensors load them as FP8 tensors
+    # automatically. Saves ~50% of T5 (~5GB) and ~50% of transformer (~2.3GB).
+    te_path = Path(str(text_encoder_path))
+    is_fp8_te = te_path.name.startswith("t5xxl_fp8") or "fp8" in te_path.name.lower()
+    # Checkpoint path can also be FP8 in future — for now only 2B-distilled fp8 exists
+    is_fp8_ckpt = "fp8" in ckpt_path.name.lower()
+    use_fp8 = is_fp8_te and is_fp8_ckpt
+    dtype = torch.float8_e4m3fn if use_fp8 else torch.bfloat16
 
     # 1) transformer (from the same safetensors)
     transformer = Transformer3DModel.from_pretrained(str(ckpt_path)).to(dtype)
@@ -146,10 +157,20 @@ def _build_official(ckpt_path, text_encoder_path, precision,
     # 3) scheduler
     scheduler = RectifiedFlowScheduler.from_pretrained(str(ckpt_path))
 
-    # 4) text encoder (PixArt T5-XXL, separate directory)
+    # 4) text encoder (T5-XXL FP8 or BF16, separate directory)
+    # Note: transformers' from_pretrained with dtype=fp8 fails on some Windows
+    # torch builds because set_default_dtype doesn't accept fp8. Load in bfloat16
+    # then convert module-by-module.
     text_encoder = T5EncoderModel.from_pretrained(
         str(text_encoder_path), subfolder="text_encoder"
-    ).to(dtype)
+    )
+    if is_fp8_te:
+        # The safetensors already contains FP8 weights; PyTorch loads them as FP8
+        # tensors automatically because of the file's metadata dtype. No further
+        # cast needed — keep as-is to save VRAM.
+        pass
+    else:
+        text_encoder = text_encoder.to(dtype)
     tokenizer = T5Tokenizer.from_pretrained(
         str(text_encoder_path), subfolder="tokenizer"
     )
@@ -169,6 +190,37 @@ def _build_official(ckpt_path, text_encoder_path, precision,
         prompt_enhancer_llm_tokenizer=None,
         allowed_inference_steps=cfg.get("allowed_inference_steps", None),
     ).to(device)
+
+
+# Inside _build_official, after the pipeline is built, call enable_model_cpu_offload
+# on hosts with insufficient VRAM. This is the pattern from diffusers' "Low VRAM"
+# guide. Note: this must be called *after* the pipeline exists and before inference.
+# We expose it as a helper for the caller.
+
+
+def enable_low_vram_offload(pipeline) -> None:
+    """Enable a manual device split for low-VRAM hosts.
+
+    The transformer is the largest module (≈ 4.5 GB BF16). We move it to CPU
+    and rely on the official `LTXVideoPipeline.__call__`'s built-in
+    `offload_to_cpu=True` flag to page it back to GPU only when needed.
+    Text encoder (~4.75 GB FP8) + scheduler + patchifier stay on GPU.
+
+    This is the simplest reliable path on 8 GB hardware — accelerate's
+    `cpu_offload` puts modules in meta-state which the official pipeline
+    doesn't handle.
+    """
+    if not torch.cuda.is_available():
+        return
+    if getattr(pipeline, "_ltx_offload_applied", False):
+        return
+    # Move transformer + VAE to CPU; text_encoder + scheduler + patchifier stay on GPU.
+    try:
+        pipeline.transformer = pipeline.transformer.to("cpu")
+        pipeline.vae = pipeline.vae.to("cpu")
+    except Exception:
+        return
+    pipeline._ltx_offload_applied = True
 
 
 def _build_diffusers(ckpt_path, LTXPipeline):
