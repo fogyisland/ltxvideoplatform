@@ -19,6 +19,7 @@ class ModelEntry:
     description: str
     use_case: str = ""        # e.g. "fast previews", "high quality"
     disk_size_gb: float = 0.0  # approx on-disk size after snapshot_download
+    text_encoder_path: str | None = None  # override default MODEL_DIR/text_encoder
 
 
 @dataclass
@@ -51,6 +52,7 @@ def load(path: Path) -> Registry:
             description=m.get("description", ""),
             use_case=m.get("use_case", ""),
             disk_size_gb=float(m.get("disk_size_gb", 0.0)),
+            text_encoder_path=m.get("text_encoder_path") or None,
         )
         for m in raw["models"]
     ]

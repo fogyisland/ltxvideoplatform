@@ -1,15 +1,12 @@
-"""Job runner: drives a single job from ``queued`` to a terminal state.
+"""app/core/job_runner.py
 
-The runner is an ``async`` coroutine that is always called inside the
-:class:`JobQueue` worker. All blocking work (model load, inference, file
-I/O) is dispatched via :func:`asyncio.to_thread` so the event loop is never
-starved. The whole pipeline is wrapped in :func:`asyncio.wait_for` so that
-``JOB_TIMEOUT_SEC`` is enforced end-to-end.
+Drives a single job from `queued` to a terminal state.
 
-DB writes happen on the session passed in by the worker. The runner mutates
-``Job.status``, ``Job.stage``, ``Job.progress``, ``Job.error``,
-``Job.output_path``, ``Job.started_at``, ``Job.finished_at``, and
-``Job.duration_sec`` directly.
+The inference call goes through ``app.core.ltx_wrappers.get_pipeline`` (which
+caches the loaded pipeline per process) and then ``ltx_generate``. The runner
+itself is async; all blocking work runs in ``asyncio.to_thread`` so the event
+loop is never starved; everything is wrapped in ``asyncio.wait_for`` so the
+``JOB_TIMEOUT_SEC`` ceiling is enforced.
 """
 from __future__ import annotations
 
@@ -27,16 +24,13 @@ from app.config import get_settings
 from app.core import pipeline_manager as pm_mod
 from app.core import registry as reg_mod
 from app.core.ltx_wrappers import generate as ltx_generate
+from app.core.ltx_wrappers import get_pipeline, unload_pipeline
 from app.db.models import Job, JobStage, JobStatus, Upload
 from app.storage import files
 
 
 async def run(job_id: str, db: Session) -> None:
-    """Execute a job end-to-end and persist progress to ``db``.
-
-    Errors are caught and recorded on the job row; this function never
-    re-raises (the worker is responsible for crash reporting).
-    """
+    """Execute a job end-to-end. Errors are caught and persisted on the row."""
     s = get_settings()
     j: Job | None = db.get(Job, job_id)
     if j is None:
@@ -44,16 +38,16 @@ async def run(job_id: str, db: Session) -> None:
     if j.status == JobStatus.cancelled:
         return
 
-    # ---- model_load branch (early return: no inference) ----
-    # Placed at the top so ``POST /api/v1/models/{id}/load`` does not try
-    # to allocate an inference pipeline. ``op=unload`` is also handled here
-    # (model_id is the sentinel "__unload__" set by app.api.models).
+    # ---- model_load branch (early return) ----
     if j.kind == "model_load":
         params = json.loads(j.params_json)
         if params.get("op") == "unload":
+            unload_pipeline(j.model_id)
             pm_mod.get_manager().unload()
         else:
-            pm_mod.get_manager().load(j.model_id, loader=_real_loader_for(j.model_id))
+            # Warm the cache + touch the singleton so /models/current reflects it
+            get_pipeline(j.model_id)
+            pm_mod.get_manager().load(j.model_id, loader=lambda _: get_pipeline(j.model_id))
         j.status = JobStatus.succeeded
         j.finished_at = datetime.now(timezone.utc)
         db.commit()
@@ -65,25 +59,10 @@ async def run(job_id: str, db: Session) -> None:
     j.started_at = datetime.now(timezone.utc)
     db.commit()
 
-    pm = pm_mod.get_manager()
-
-    def _ensure_loaded(model_id: str) -> None:
-        # If the requested model is already loaded, skip.
-        if pm.current_id == model_id:
-            return
-        reg = reg_mod.load(s.registry_path)
-        entry = reg.by_id(model_id)
-        if entry is None:
-            raise RuntimeError(f"unknown model: {model_id}")
-        ckpt = s.model_dir_abs / entry.checkpoint_path
-        if not ckpt.exists():
-            raise FileNotFoundError(f"checkpoint missing: {ckpt}")
-        # Real loader wiring (uses LTXVideoPipeline.from_pretrained).
-        pm.load(model_id, loader=_real_loader_for(model_id))
-
     try:
+        # ---- Pipeline load (lazy, cached per process) ----
         await asyncio.wait_for(
-            asyncio.to_thread(_ensure_loaded, j.model_id),
+            asyncio.to_thread(_ensure_pipeline, j.model_id),
             timeout=s.job_timeout_sec,
         )
 
@@ -91,64 +70,30 @@ async def run(job_id: str, db: Session) -> None:
         j.stage = JobStage.encoding
         db.commit()
 
-        # ---- extend branch: extract last frame from parent output, save as upload ----
-        # Convert the ``extend`` job into an ``i2v`` job by:
-        #   1. Reading the parent's output MP4.
-        #   2. Grabbing the last frame via imageio.
-        #   3. Persisting it as an Upload row (PNG).
-        #   4. Setting image_upload_id + default strength on the params.
-        # From here, the inference path is identical to a normal i2v job.
+        # ---- extend branch: convert to i2v by extracting parent's last frame ----
         if j.kind == "extend":
             if not j.parent_job_id:
                 raise RuntimeError("extend job has no parent_job_id")
             parent = db.get(Job, j.parent_job_id)
             if parent is None or not parent.output_path:
-                raise RuntimeError(
-                    f"parent job missing or has no output: {j.parent_job_id}"
-                )
+                raise RuntimeError(f"parent job missing or has no output: {j.parent_job_id}")
             parent_video = s.data_dir_abs / parent.output_path
             if not parent_video.exists():
                 raise FileNotFoundError(f"parent video missing: {parent_video}")
-
-            import imageio.v2 as imageio
-
-            reader = imageio.get_reader(str(parent_video))
-            try:
-                meta = reader.get_meta_data()
-                nframes = int(meta.get("nframes", 0)) if isinstance(meta, dict) else 0
-                if nframes <= 0:
-                    nframes = reader.count_frames()
-            finally:
-                reader.close()
-            last_idx = max(0, int(nframes) - 1)
-
-            reader = imageio.get_reader(str(parent_video))
-            try:
-                frame_arr = reader.get_data(last_idx)
-            finally:
-                reader.close()
-
-            img = Image.fromarray(frame_arr)
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            png_bytes = buf.getvalue()
+            image = _extract_last_frame(parent_video)
+            # upload the PNG so it can be referenced by id (kept for audit)
+            png_bytes = _png_bytes(image)
             upload_path, sha = files.save_upload(j.user_id, png_bytes, ".png")
-            new_upload_id = str(ulid.ULID())
             up_rec = Upload(
-                id=new_upload_id,
-                user_id=j.user_id,
-                path=str(upload_path.relative_to(files.uploads_dir)),
-                kind="image",
-                sha256=sha,
+                id=str(ulid.ULID()), user_id=j.user_id,
+                path=str(upload_path.relative_to(files.uploads_dir())),
+                kind="image", sha256=sha,
             )
-            db.add(up_rec)
-            db.commit()
-
-            params["image_upload_id"] = new_upload_id
-            if "strength" not in params or params.get("strength") is None:
-                params["strength"] = 0.6
+            db.add(up_rec); db.commit()
+            params["image_upload_id"] = up_rec.id
+            params.setdefault("strength", 0.6)
             j.params_json = json.dumps(params)
-            j.kind = "i2v"  # downstream treats this as an i2v job
+            j.kind = "i2v"
             db.commit()
 
         progress_state = {"p": 0.0}
@@ -156,24 +101,17 @@ async def run(job_id: str, db: Session) -> None:
         def _on_step(step: int, total: int) -> None:
             j.stage = JobStage.denoising
             j.progress = step / total if total else 0.0
-            # Throttle DB writes: every 5 steps or at the end.
             if step % 5 == 0 or step == total:
                 db.commit()
 
         def _run_inference() -> bytes:
             j.stage = JobStage.denoising
             db.commit()
-            # Resolve image_upload_id -> PIL.Image for i2v-style runs.
-            image: Image.Image | None = None
+            image = _resolve_image(j, db)
             call_params = dict(params)
-            upload_id = call_params.pop("image_upload_id", None)
-            if upload_id:
-                upload = db.get(Upload, upload_id)
-                if upload is not None:
-                    full_path = files.uploads_dir / upload.path
-                    image = Image.open(full_path)
+            call_params.pop("image_upload_id", None)
             mp4 = ltx_generate(
-                pipeline=pm.get(),
+                pipeline=get_pipeline(j.model_id),
                 kind=j.kind,
                 on_step=_on_step,
                 image=image,
@@ -194,8 +132,7 @@ async def run(job_id: str, db: Session) -> None:
         db.commit()
 
         out_path = files.save_output(j.user_id, j.id, mp4_bytes)
-        rel = str(out_path.relative_to(s.data_dir_abs))
-        j.output_path = rel
+        j.output_path = str(out_path.relative_to(s.data_dir_abs))
         j.duration_sec = time.time() - t0
         j.status = JobStatus.succeeded
         j.finished_at = datetime.now(timezone.utc)
@@ -207,26 +144,51 @@ async def run(job_id: str, db: Session) -> None:
         db.commit()
 
 
-def _real_loader_for(model_id: str):
-    """Return a ``loader(model_id) -> pipeline`` closure for ``model_id``.
+# ---------- helpers ----------
 
-    The ``LTXVideoPipeline.from_pretrained`` call lives inside the returned
-    closure so it only fires when :meth:`PipelineManager.load` actually
-    invokes the loader. This keeps the app importable even when the
-    ``ltx_video`` package is not installed in the environment (the import
-    is lazy). The closure ignores its ``model_id`` argument and uses the
-    checkpoint path captured from the registry.
-    """
-    s = get_settings()
-    reg = reg_mod.load(s.registry_path)
-    entry = reg.by_id(model_id)
-    if entry is None:
-        raise RuntimeError(f"unknown model: {model_id}")
-    ckpt = s.model_dir_abs / entry.checkpoint_path
+def _ensure_pipeline(model_id: str) -> None:
+    """Build the pipeline if not already cached. Lazy + memoized."""
+    get_pipeline(model_id)
 
-    def _loader(_model_id: str):
-        # Import lazily; LTX-Video is heavy and only loaded when needed.
-        from ltx_video.pipelines.pipeline_ltx_video import LTXVideoPipeline
-        return LTXVideoPipeline.from_pretrained(str(ckpt))
 
-    return _loader
+def _resolve_image(job: Job, db: Session) -> Image.Image | None:
+    """Resolve the optional image_upload_id param to a PIL.Image."""
+    try:
+        params = json.loads(job.params_json)
+    except Exception:
+        params = {}
+    upload_id = params.get("image_upload_id")
+    if not upload_id:
+        return None
+    up = db.get(Upload, upload_id)
+    if up is None:
+        return None
+    full_path = files.uploads_dir() / up.path
+    if not full_path.exists():
+        return None
+    return Image.open(full_path)
+
+
+def _extract_last_frame(mp4_path) -> Image.Image:
+    import imageio.v2 as imageio
+    reader = imageio.get_reader(str(mp4_path))
+    try:
+        meta = reader.get_meta_data()
+        nframes = int(meta.get("nframes", 0)) if isinstance(meta, dict) else 0
+        if nframes <= 0:
+            nframes = reader.count_frames()
+    finally:
+        reader.close()
+    last_idx = max(0, int(nframes) - 1)
+    reader = imageio.get_reader(str(mp4_path))
+    try:
+        frame_arr = reader.get_data(last_idx)
+    finally:
+        reader.close()
+    return Image.fromarray(frame_arr)
+
+
+def _png_bytes(image: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return buf.getvalue()
