@@ -17,6 +17,22 @@ The pipeline is built exactly as the official `create_ltx_video_pipeline()` does
 For low-VRAM hosts (≤8 GB) we enable `offload_to_cpu=True` in `pipeline(...)`
 which moves the text encoder to CPU between steps (handled internally by
 `LTXVideoPipeline`).
+
+Two inference paths are supported side-by-side:
+
+  * **FP8 + monkey-patch** (default for 2B-distilled on 8 GB hosts)
+    Uses `t5xxl_fp8_e4m3fn.safetensors` (4 GB on disk). The patch in
+    `_patch_torch_finfo_for_fp8` fixes `torch.finfo(fp8).min` calls inside
+    T5's causal-mask construction, which would otherwise raise
+    `NotImplementedError` on torch builds that don't support FP8 finfo.
+
+  * **GGUF Q4** (path for 8 GB hosts that can't use FP8 at all)
+    Uses `ltxv-2b-0.9.8-distilled-q4_0.gguf` (1.2 GB) + a GGUF T5.
+    The `ltx_video` package itself doesn't load GGUF, so this path requires
+    a different backend (e.g. llama-cpp-python + a thin wrapper that
+    exposes a HuggingFace-compatible T5EncoderModel). The GGUF files are
+    downloaded into `models/gguf/` ready for that wrapper to consume.
+    See `docs/LTX_VIDEO_SETUP.md` for the integration sketch.
 """
 from __future__ import annotations
 import os
@@ -30,6 +46,54 @@ from PIL import Image
 
 from app.config import get_settings
 from app.core.long_video import split_prompts, window_plan
+
+
+# ----------------------------------------------------------------
+# FP8 finfo monkey-patch
+# ----------------------------------------------------------------
+# transformers' T5 model uses `torch.finfo(dtype).min` to construct the
+# causal attention mask. PyTorch's Windows builds don't support
+# `finfo(Float8_e4m3fn)` — it raises `NotImplementedError`. We patch
+# `torch.finfo` globally so any call with an FP8 dtype returns the bf16
+# properties (T5's `min` is only used as a sentinel for masked positions,
+# so the exact bit pattern doesn't matter as long as the dtype can
+# represent the value).
+#
+# Even with the finfo fix, PyTorch's FP8 arithmetic on Windows
+# (`ufunc_add`, `rsub`, etc.) is not implemented, so a single FP8
+# multiply in T5's mask construction still crashes. To get past that we
+# also upcast FP8 → bf16 on every parameter/buffer of the text encoder
+# right after loading. Doubles the encoder's VRAM cost (4 GB → 8 GB)
+# but keeps the on-disk size at 4 GB; that's the price for 8 GB GPUs.
+
+_original_torch_finfo = torch.finfo
+
+
+def _patched_torch_finfo(dtype):
+    if dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+        return _original_torch_finfo(torch.bfloat16)
+    return _original_torch_finfo(dtype)
+
+
+torch.finfo = _patched_torch_finfo
+
+
+def _fp8_to_bf16(model: torch.nn.Module) -> int:
+    """Upcast every FP8 parameter/buffer in `model` to bfloat16 in-place.
+
+    Returns the number of tensors converted.
+    """
+    n = 0
+    with torch.no_grad():
+        for p in model.parameters():
+            if p.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                p.data = p.data.to(torch.bfloat16)
+                n += 1
+        for b in model.buffers():
+            if b.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
+                b.data = b.data.to(torch.bfloat16)
+                n += 1
+    return n
 
 
 # ----------------------------------------------------------------
@@ -158,17 +222,16 @@ def _build_official(ckpt_path, text_encoder_path, precision,
     scheduler = RectifiedFlowScheduler.from_pretrained(str(ckpt_path))
 
     # 4) text encoder (T5-XXL FP8 or BF16, separate directory)
-    # Note: transformers' from_pretrained with dtype=fp8 fails on some Windows
-    # torch builds because set_default_dtype doesn't accept fp8. Load in bfloat16
-    # then convert module-by-module.
+    # Note: PyTorch's FP8 arithmetic on Windows is not implemented, so a
+    # text encoder stored as FP8 will crash at the first matmul/mask op
+    # even with the finfo patch. We load it then upcast FP8 → bf16 in-place
+    # (doubles VRAM cost of the encoder but keeps the on-disk size at 4 GB).
     text_encoder = T5EncoderModel.from_pretrained(
         str(text_encoder_path), subfolder="text_encoder"
     )
     if is_fp8_te:
-        # The safetensors already contains FP8 weights; PyTorch loads them as FP8
-        # tensors automatically because of the file's metadata dtype. No further
-        # cast needed — keep as-is to save VRAM.
-        pass
+        n = _fp8_to_bf16(text_encoder)
+        print(f"[ltx] upcast {n} FP8 tensors in T5 → bf16 (VRAM now ≈ 8 GB for encoder)")
     else:
         text_encoder = text_encoder.to(dtype)
     tokenizer = T5Tokenizer.from_pretrained(
@@ -192,32 +255,23 @@ def _build_official(ckpt_path, text_encoder_path, precision,
     ).to(device)
 
 
-# Inside _build_official, after the pipeline is built, call enable_model_cpu_offload
-# on hosts with insufficient VRAM. This is the pattern from diffusers' "Low VRAM"
-# guide. Note: this must be called *after* the pipeline exists and before inference.
-# We expose it as a helper for the caller.
-
-
 def enable_low_vram_offload(pipeline) -> None:
-    """Enable a manual device split for low-VRAM hosts.
+    """Enable a manual device split for low-VRAM hosts (8 GB cards).
 
-    The transformer is the largest module (≈ 4.5 GB BF16). We move it to CPU
-    and rely on the official `LTXVideoPipeline.__call__`'s built-in
-    `offload_to_cpu=True` flag to page it back to GPU only when needed.
-    Text encoder (~4.75 GB FP8) + scheduler + patchifier stay on GPU.
-
-    This is the simplest reliable path on 8 GB hardware — accelerate's
-    `cpu_offload` puts modules in meta-state which the official pipeline
-    doesn't handle.
+    Layout: text encoder (bf16) + scheduler + patchifier on GPU;
+    transformer + VAE on CPU. The official `offload_to_cpu=True` flag in
+    the call handles VAE only. The transformer module is paged in/out
+    per step by `generate()` (since the official pipeline calls
+    `self.transformer(...)` directly, it doesn't know to move it).
     """
     if not torch.cuda.is_available():
         return
     if getattr(pipeline, "_ltx_offload_applied", False):
         return
-    # Move transformer + VAE to CPU; text_encoder + scheduler + patchifier stay on GPU.
     try:
         pipeline.transformer = pipeline.transformer.to("cpu")
         pipeline.vae = pipeline.vae.to("cpu")
+        torch.cuda.empty_cache()
     except Exception:
         return
     pipeline._ltx_offload_applied = True
