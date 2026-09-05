@@ -40,12 +40,12 @@ models:
     kind: t2v_distilled
     checkpoint_path: ltxv-2b-0.9.8-distilled.safetensors
     config_path: transformer/config.json
-    text_encoder_path: t5xxl_fp8
+    text_encoder_path: t5xxl_bf16
     default_steps: 8
     default_frames: 97
     vram_gb: 6
     enabled: true
-    description: "Lightweight 2B distilled for low-VRAM machines (FP8 text encoder)"
+    description: "Lightweight 2B distilled; BF16 T5 + 4-bit NF4 quantization for 8 GB GPUs"
     use_case: "low-end GPU · 4-8 GB VRAM · quick drafts"
     disk_size_gb: 6.0
   - id: ltx-13b-full

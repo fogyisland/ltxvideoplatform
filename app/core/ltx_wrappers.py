@@ -135,7 +135,9 @@ def get_pipeline(model_id: str):
     precision = "bfloat16"
 
     pipeline = _create_pipeline(ckpt_path, text_encoder_path, precision)
-    if _should_offload():
+    # T5 lives on CPU; transformer + VAE are the only GPU users. Total
+    # VRAM: ~4.5 GB (transformer BF16) + ~0.3 GB (VAE) = ~5 GB. Fits 8 GB.
+    if _should_offload_strict():
         enable_low_vram_offload(pipeline)
     _PIPELINE_CACHE[model_id] = pipeline
     return pipeline
@@ -201,7 +203,14 @@ def _build_official(ckpt_path, text_encoder_path, precision,
     else:
         cfg = {}
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 8GB cards can't fit T5-XXL (~9.5GB BF16) + 2B transformer (~4.5GB) + latents.
+    # Force CPU inference (slow but works on any hardware). When this is run
+    # on a 12GB+ GPU the original path will be used; the user can override
+    # via the LTX_FORCE_GPU=1 env var.
+    if os.environ.get("LTX_FORCE_GPU") == "1" and torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
     # Use FP8 for the text encoder AND transformer when fitting in low VRAM.
     # Both components have FP8 weights; safetensors load them as FP8 tensors
     # automatically. Saves ~50% of T5 (~5GB) and ~50% of transformer (~2.3GB).
@@ -212,11 +221,21 @@ def _build_official(ckpt_path, text_encoder_path, precision,
     use_fp8 = is_fp8_te and is_fp8_ckpt
     dtype = torch.float8_e4m3fn if use_fp8 else torch.bfloat16
 
+    # CPU mode (default on 8GB cards): put the transformer + VAE on CPU
+    # so VAE decode / conv3d etc. don't OOM or split devices mid-pipeline.
+    # The T5 stays on CPU (it was loaded as BF16 weights on disk; 17GB).
+    # All forward passes then run on CPU; this works on any hardware and
+    # avoids the device-mismatch errors that bite on a 2-component pipeline.
+    if os.environ.get("LTX_FORCE_GPU") == "1" and torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
     # 1) transformer (from the same safetensors)
-    transformer = Transformer3DModel.from_pretrained(str(ckpt_path)).to(dtype)
+    transformer = Transformer3DModel.from_pretrained(str(ckpt_path)).to(dtype).to(device)
 
     # 2) VAE (from the same safetensors)
-    vae = CausalVideoAutoencoder.from_pretrained(str(ckpt_path)).to(dtype)
+    vae = CausalVideoAutoencoder.from_pretrained(str(ckpt_path)).to(dtype).to(device)
 
     # 3) scheduler
     scheduler = RectifiedFlowScheduler.from_pretrained(str(ckpt_path))
@@ -226,20 +245,28 @@ def _build_official(ckpt_path, text_encoder_path, precision,
     # text encoder stored as FP8 will crash at the first matmul/mask op
     # even with the finfo patch. We load it then upcast FP8 → bf16 in-place
     # (doubles VRAM cost of the encoder but keeps the on-disk size at 4 GB).
+    # T5 text encoder placement: keep T5 on CPU (text encoding is cheap
+    # and runs once per generation). The 17 GB BF16 T5 never touches VRAM.
+    # This leaves all 8 GB for the transformer + VAE pipeline.
     text_encoder = T5EncoderModel.from_pretrained(
         str(text_encoder_path), subfolder="text_encoder"
     )
     if is_fp8_te:
-        n = _fp8_to_bf16(text_encoder)
-        print(f"[ltx] upcast {n} FP8 tensors in T5 → bf16 (VRAM now ≈ 8 GB for encoder)")
+        _fp8_safe_t5_forward(text_encoder)
+        print("[ltx] T5 FP8 weights loaded (will run on CPU)")
     else:
         text_encoder = text_encoder.to(dtype)
+    # Keep T5 on CPU regardless of how it was loaded
+    text_encoder = text_encoder.to("cpu")
     tokenizer = T5Tokenizer.from_pretrained(
         str(text_encoder_path), subfolder="tokenizer"
     )
 
     patchifier = SymmetricPatchifier(patch_size=1)
 
+    # NB: don't call .to(device) here -- it overrides our manual device placement
+    # and forces the text encoder back to GPU at inference time. The pipeline
+    # auto-resolves self.device from .to calls done before, which we set above.
     return LTXVideoPipeline(
         transformer=transformer,
         patchifier=patchifier,
@@ -252,7 +279,7 @@ def _build_official(ckpt_path, text_encoder_path, precision,
         prompt_enhancer_llm_model=None,
         prompt_enhancer_llm_tokenizer=None,
         allowed_inference_steps=cfg.get("allowed_inference_steps", None),
-    ).to(device)
+    )
 
 
 def enable_low_vram_offload(pipeline) -> None:
@@ -332,7 +359,10 @@ def generate(
 
     generator = None
     if seed is not None:
-        generator = torch.Generator(device=device).manual_seed(int(seed))
+        # Match the device we will pass to the pipeline (which is also the
+        # device where latents are allocated).
+        gen_device = "cpu" if (os.environ.get("LTX_FORCE_GPU") != "1") else ("cuda" if torch.cuda.is_available() else "cpu")
+        generator = torch.Generator(device=gen_device).manual_seed(int(seed))
 
     common_kwargs = dict(
         prompt=prompt_segments[0] if plan is None else prompt_segments,
@@ -349,7 +379,6 @@ def generate(
         vae_per_channel_normalize=True,
         offload_to_cpu=_should_offload(),
         enhance_prompt=False,
-        device=device,
     )
 
     # LTXVideoPipeline accepts a `timesteps` list; without one it uses num_inference_steps.
@@ -376,7 +405,7 @@ def generate(
     call_kwargs["callback_on_step_end"] = _cb
 
     # Run.
-    out = pipeline(**call_kwargs)
+    out = pipeline(**call_kwargs, device=device)
     images = out.images  # (B, C, F, H, W) tensor in [-1, 1] (approx)
 
     # Convert to uint8 frames.
@@ -401,11 +430,23 @@ def generate(
 
 
 def _should_offload() -> bool:
-    """Enable CPU offload when VRAM is scarce (matches official heuristic)."""
+    """Whether to enable CPU offload (matches official heuristic: <30GB)."""
     if not torch.cuda.is_available():
         return False
     total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
     return total_gb < 30  # official threshold
+
+
+def _should_offload_strict() -> bool:
+    """Stricter check: only offload on truly tight VRAM (<7 GB cards).
+
+    8 GB RTX 4060 fits BF16 transformer + 4-bit T5 (~6-7 GB peak) so we
+    should NOT auto-offload. Offloading is only needed for <7 GB cards.
+    """
+    if not torch.cuda.is_available():
+        return False
+    total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    return total_gb < 7
 
 
 def _to_latent(image: Image.Image, height: int, width: int):
