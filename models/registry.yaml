@@ -38,15 +38,15 @@ models:
   - id: ltx-2b-distilled
     display_name: "LTX-Video 2B Distilled"
     kind: t2v_distilled
-    checkpoint_path: ltx-video-2b-distilled/model.safetensors
-    config_path: ltx-video-2b-distilled/config.yaml
+    checkpoint_path: ltxv-2b-0.9.8-distilled.safetensors
+    config_path: transformer/config.json
     default_steps: 8
     default_frames: 97
     vram_gb: 6
     enabled: true
     description: "Lightweight 2B distilled for low-VRAM machines"
     use_case: "low-end GPU · 4-8 GB VRAM · quick drafts"
-    disk_size_gb: 5.0
+    disk_size_gb: 6.0
   - id: ltx-13b-full
     display_name: "LTX-Video 13B Full (no distill)"
     kind: t2v_full
