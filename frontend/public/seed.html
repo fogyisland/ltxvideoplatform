@@ -1,5 +1,11 @@
 <!doctype html>
-<html><body><script>
-localStorage.setItem('ltx_token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzg4NTQwNzQwLCJleHAiOjE3ODg1ODM5NDB9.yaU5voVBg7o0jG7NyyO7Oa4F03s3baU96Mvj8uqj1nQ');
-location.replace('/projects/01M1PKJDJZWV02Y3MKMNF3DCE1');
-</script></body></html>
+<html><head><meta charset="utf-8"></head>
+<body>
+<script>
+const TOK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzg4NjE0NTUwLCJleHAiOjE3ODg2NTc3NTB9.c106YHuIUW1SH8UVqDUsTnDI0P7idKjdfKuKTLg309U';
+const NEXT = new URLSearchParams(location.search).get('next') || '/create';
+// Set before navigating to ensure AuthProvider sees it on mount
+localStorage.setItem('ltx_token', TOK);
+location.replace(NEXT);
+</script>
+</body></html>

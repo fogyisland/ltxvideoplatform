@@ -1,4 +1,5 @@
 "use client";
+import type { SystemInfo, InferenceMode } from "@/lib/types";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -49,6 +50,12 @@ export default function CreatePage() {
     api.listModels(token).then(setModels).catch(() => setModels([]));
   }, [token]);
 
+  const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
+  const [inferenceMode, setInferenceMode] = useState<InferenceMode>("auto");
+  useEffect(() => {
+    api.systemInfo().then(setSysInfo).catch(() => setSysInfo(null));
+  }, []);
+
   if (loading || !user || !token) {
     return <div style={{ padding: 40, textAlign: "center", color: "var(--ink-1)" }}>…</div>;
   }
@@ -81,7 +88,7 @@ export default function CreatePage() {
           model_id: modelId, prompt: fullPrompt,
           num_frames: numFrames, height: h, width: w,
           num_inference_steps: steps, guidance_scale: 5.0, fps: 24,
-        });
+        }, inferenceMode);
         jobId = r.job_id;
       } else {
         if (!imageFile) { setErr(t("err_no_image")); setBusy(false); return; }
@@ -90,7 +97,7 @@ export default function CreatePage() {
           model_id: modelId, image_upload_id: up.id, prompt: fullPrompt,
           strength: imageStrength, num_frames: numFrames,
           num_inference_steps: steps, guidance_scale: 5.0, fps: 24,
-        });
+        }, inferenceMode);
         jobId = r.job_id;
       }
       // poll

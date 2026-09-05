@@ -1,6 +1,6 @@
 // lib/api.ts — typed wrapper over the FastAPI backend.
 import type {
-  AdminModel, AdminStats, AdminUser, Job, JobSummary, Model, Project, ProjectSummary, Scene, User,
+  AdminModel, AdminStats, AdminUser, InferenceMode, Job, JobSummary, Model, Project, ProjectSummary, Scene, SystemInfo, User,
 } from "./types";
 
 export class ApiError extends Error {
@@ -79,12 +79,24 @@ export const api = {
     return request<Model[]>("/api/v1/models", { token });
   },
 
-  async submitT2V(token: string, params: Record<string, unknown>): Promise<{ job_id: string }> {
-    return request<{ job_id: string }>("/api/v1/t2v", { method: "POST", body: params, token });
+  async submitT2V(
+    token: string,
+    params: Record<string, unknown>,
+    mode: InferenceMode = "auto",
+  ): Promise<{ job_id: string }> {
+    return request<{ job_id: string }>(`/api/v1/t2v?mode=${mode}`, {
+      method: "POST", body: params, token,
+    });
   },
 
-  async submitI2V(token: string, params: Record<string, unknown>): Promise<{ job_id: string }> {
-    return request<{ job_id: string }>("/api/v1/i2v", { method: "POST", body: params, token });
+  async submitI2V(
+    token: string,
+    params: Record<string, unknown>,
+    mode: InferenceMode = "auto",
+  ): Promise<{ job_id: string }> {
+    return request<{ job_id: string }>(`/api/v1/i2v?mode=${mode}`, {
+      method: "POST", body: params, token,
+    });
   },
 
   async submitExtend(token: string, params: Record<string, unknown>): Promise<{ job_id: string }> {
@@ -170,6 +182,10 @@ export const api = {
 
   async adminStats(token: string): Promise<AdminStats> {
     return request<AdminStats>("/api/v1/admin/stats", { token });
+  },
+
+  async systemInfo(): Promise<SystemInfo> {
+    return request<SystemInfo>("/api/v1/system/info");
   },
 
   // helpers

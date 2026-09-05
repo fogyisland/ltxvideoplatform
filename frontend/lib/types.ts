@@ -135,3 +135,15 @@ export type AdminStats = {
   }>;
   server_time: string;
 };
+
+export type SystemInfo = {
+  gpu_available: boolean;
+  gpu_name: string | null;
+  vram_total_gb: number;
+  vram_used_gb: number;
+  recommended_mode: "cpu" | "gpu";
+  estimated_seconds_per_clip: number;
+  vram_threshold_gb: number;
+};
+
+export type InferenceMode = "auto" | "cpu" | "gpu";

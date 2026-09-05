@@ -38,6 +38,17 @@ async def run(job_id: str, db: Session) -> None:
     if j.status == JobStatus.cancelled:
         return
 
+    # Apply per-job mode override: "auto" honors VRAM (handled by ltx_wrappers),
+    # "cpu" forces the CPU path, "gpu" forces the official GPU path (requires
+    # >=16GB VRAM). The env var only takes effect for the duration of this job.
+    params_preview = json.loads(j.params_json)
+    _mode = (params_preview.get("_mode") or "auto").lower()
+    if _mode == "gpu":
+        os.environ["LTX_FORCE_GPU"] = "1"
+    elif _mode == "cpu":
+        os.environ["LTX_FORCE_GPU"] = "0"
+    # "auto" leaves the env var as set at process start.
+
     # ---- model_load branch (early return) ----
     if j.kind == "model_load":
         params = json.loads(j.params_json)

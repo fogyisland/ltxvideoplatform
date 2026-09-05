@@ -1,6 +1,6 @@
 # app/api/generation.py
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.schemas import GenerateIn
@@ -23,15 +23,27 @@ def _enqueue(u: User, kind: str, params: dict) -> str:
 
 
 @router.post("/t2v", status_code=202)
-def t2v(req: GenerateIn, u: User = Depends(current_user)):
-    return {"job_id": _enqueue(u, "t2v", req.model_dump())}
+def t2v(
+    req: GenerateIn,
+    u: User = Depends(current_user),
+    mode: str = Query(default="auto", pattern="^(auto|cpu|gpu)$"),
+):
+    payload = req.model_dump()
+    payload["_mode"] = mode
+    return {"job_id": _enqueue(u, "t2v", payload)}
 
 
 @router.post("/i2v", status_code=202)
-def i2v(req: GenerateIn, u: User = Depends(current_user)):
+def i2v(
+    req: GenerateIn,
+    u: User = Depends(current_user),
+    mode: str = Query(default="auto", pattern="^(auto|cpu|gpu)$"),
+):
     if not req.image_upload_id:
         raise HTTPException(400, "image_upload_id required")
-    return {"job_id": _enqueue(u, "i2v", req.model_dump())}
+    payload = req.model_dump()
+    payload["_mode"] = mode
+    return {"job_id": _enqueue(u, "i2v", payload)}
 
 
 @router.post("/keyframe", status_code=202)
