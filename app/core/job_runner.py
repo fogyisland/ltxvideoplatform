@@ -148,11 +148,27 @@ async def run(job_id: str, db: Session) -> None:
         j.status = JobStatus.succeeded
         j.finished_at = datetime.now(timezone.utc)
         db.commit()
+        # Aggressive VRAM reclamation between jobs (8 GB cards run right
+        # at the edge; tiny leftover tensors can OOM the next request).
+        import gc as _gc
+        _gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
     except Exception as e:
         j.status = JobStatus.failed
         j.error = repr(e)[:2000]
         j.finished_at = datetime.now(timezone.utc)
         db.commit()
+        # Free VRAM even on failure so we don't accumulate leaked tensors
+        import gc as _gc
+        try:
+            _gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception:
+            pass
 
 
 # ---------- helpers ----------

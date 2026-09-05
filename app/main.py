@@ -6,8 +6,25 @@ import logging
 import os
 import threading
 
+import torch
 import uvicorn
 from fastapi import FastAPI
+
+# Enable PyTorch 2.x scaled_dot_product_attention (FlashAttention backend
+# when available). Lowers 3D-Attention memory significantly on 8 GB cards.
+if torch.cuda.is_available():
+    try:
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+    except Exception:
+        pass
+
+# Anti-fragmentation for PyTorch CUDA caching allocator. Prevents mid-job
+# OOM caused by tiny block scattering after several del/allocs.
+os.environ.setdefault(
+    "PYTORCH_CUDA_ALLOC_CONF",
+    "expandable_segments:True,max_split_size_mb:256",
+)
 
 
 def build_app() -> FastAPI:

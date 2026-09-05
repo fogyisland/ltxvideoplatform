@@ -94,6 +94,13 @@ def start_api(no_gpu: bool) -> int:
     env["APP_PORT_API"] = str(API_PORT)
     if no_gpu:
         env["LTX_ALLOW_NO_CUDA"] = "1"
+    # Anti-fragmentation for PyTorch CUDA caching allocator. Prevents
+    # mid-job OOM caused by tiny block scattering after several del/allocs.
+    # See: https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-management
+    env.setdefault(
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "expandable_segments:True,max_split_size_mb:256",
+    )
     log = open(API_LOG, "ab")
     proc = subprocess.Popen(
         [sys.executable, "-c",

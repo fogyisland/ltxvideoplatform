@@ -31,8 +31,8 @@ export default function CreatePage() {
   const [imageStrength, setImageStrength] = useState(0.85);
   const [style, setStyle] = useState<Style>("Cinematic");
   const [duration, setDuration] = useState<Duration>("medium");
-  const [quality, setQuality] = useState<Quality>("standard");
-  const [size, setSize] = useState<Size>("medium");
+  const [quality, setQuality] = useState<Quality>("draft");  // 8 steps is enough for distilled; "standard"/"high" up to 40
+  const [size, setSize] = useState<Size>("small");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [models, setModels] = useState<Model[]>([]);
@@ -87,7 +87,7 @@ export default function CreatePage() {
         const r = await api.submitT2V(token, {
           model_id: modelId, prompt: fullPrompt,
           num_frames: numFrames, height: h, width: w,
-          num_inference_steps: steps, guidance_scale: 5.0, fps: 24,
+          num_inference_steps: steps, guidance_scale: 1.0, fps: 24,
         }, inferenceMode);
         jobId = r.job_id;
       } else {
@@ -96,7 +96,7 @@ export default function CreatePage() {
         const r = await api.submitI2V(token, {
           model_id: modelId, image_upload_id: up.id, prompt: fullPrompt,
           strength: imageStrength, num_frames: numFrames,
-          num_inference_steps: steps, guidance_scale: 5.0, fps: 24,
+          num_inference_steps: steps, guidance_scale: 1.0, fps: 24,
         }, inferenceMode);
         jobId = r.job_id;
       }
@@ -130,7 +130,7 @@ export default function CreatePage() {
       const modelId = models.find((m) => m.enabled)?.id || "ltx-2b-distilled";
       const r = await api.submitExtend(token, {
         parent_job_id: result.jobId, prompt: "", num_frames: 97,
-        num_inference_steps: 20, guidance_scale: 5.0, fps: 24,
+        num_inference_steps: 20, guidance_scale: 1.0, fps: 24,
       });
       const start = Date.now();
       while (Date.now() - start < 600_000) {
